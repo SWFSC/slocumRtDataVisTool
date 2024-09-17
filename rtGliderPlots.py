@@ -1,17 +1,3 @@
-# important glider variable to plot:
-    # depth
-        # dive/climb speed --> linear regression of both sides
-        # alert if slopes not good
-        # aleart target depth exceded 
-            # tell how much overshot
-    # Pitch/roll
-    # Location
-        # distance from ideal track and target
-    # temp
-    # sal
-    # O2
-    # 
-
 import numpy as np
 import pandas as pd
 import xarray as xr 
@@ -19,232 +5,272 @@ import dbdreader
 import matplotlib.pyplot as plt
 import os
 import scipy as sp
-from sklearn.tree import DecisionTreeRegressor
 from sklearn.linear_model import LinearRegression
-from numpy.linalg import lstsq
 import gsw
+import matplotlib.dates as mdates
 
-# read in data from netCDF file into object named data
-data_path = "/Users/cflaim/Documents/data/test/amlr01-20181216/amlr01-20181216-union.nc"
-data = xr.open_dataset(data_path)
+class gliderData:
+    def __init__(self):
+        self.data_dir = ""
+        self.cache_dir = ""
+        self.glider = ""
+        self.max_amphrs = 300
 
-# netCDF variable names for reference
-# vars = ["time", "heading", "pitch", "roll", "m_depth", "waypoint_latitude", "waypoint_longitude", 
-#         "conductivity", "temperature", "pressure", "chlorophyll", "cdom", "backscatter_700", 
-#         "oxygen_concentration", "distance_over_ground", "salinity", "potential_density",
-#         "profile_index", "profile_direction"]
-
-# Create variables for time, depth, and profile indice
-reg_time = np.float64(data['time'].values)
-time = data['time'].values
-depth = data["m_depth"].values
-prof_inds = data['profile_index'].values
-pitch = data['pitch'].values
-roll = data['roll'].values
-
-# Limit data to first 50k entries for ease of developement
-reg_time = reg_time[0:10000]
-time = time[0:10000]
-depth = depth[0:10000]
-prof_inds = prof_inds[0:10000]
-pitch = pitch[0:10000]
-roll = roll[0:10000]
-
-gs_kw = dict(width_ratios=[1], height_ratios=[0.5, 0.25, 0.25])
-fig = plt.figure(constrained_layout = True, figsize=(11, 8.5))
-gs = fig.add_gridspec(6, 7)
-ax1 = fig.add_subplot(gs[0:4, :5])
-ax2 = fig.add_subplot(gs[4, :5], sharex=ax1)
-ax3 = fig.add_subplot(gs[5, :5], sharex=ax2)
-ax4 = fig.add_subplot(gs[:, 5:], fc='wheat', alpha=0.5)
-# ax5 = fig.add_subplot(gs[4:, 5:], fc='wheat', alpha=0.5)
-
-ax4.xaxis.set_tick_params(labelbottom=False)
-ax4.yaxis.set_tick_params(labelleft=False)
-ax4.set_xticks([])
-ax4.set_yticks([])
-
-# ax5.xaxis.set_tick_params(labelbottom=False)
-# ax5.yaxis.set_tick_params(labelleft=False)
-# ax5.set_xticks([])
-# ax5.set_yticks([])
-# fig, [ax1, ax2, ax3]= plt.subplots(3,1, figsize=(11,8.5), sharex=True, gridspec_kw=gs_kw)
-ax1.set_title(f"Profiles {np.unique(prof_inds)[0]} - {np.unique(prof_inds)[-2]}")
-ax1.invert_yaxis()
-y2=ax1.twinx()
-ax1.set_ylabel("Depth [m]")
-ax2.set_ylabel("Pitch [deg]")
-ax3.set_ylabel("Roll [deg]")
-ax3.set_xlabel("Time")
-
-w_s = [] # empty list to store vertical velocities from each profile
-v_gs = [] # empty list to store velocity over ground from each profile
-v_ps = [] # empty list to store velocity along path from each profile
-pitch_means = []
-
-# Create dictionary to hold start and end index for each profile index
-dive_segs = {} 
-# follows structure of {'prof_name' : {'start_ind': #, 'end_ind': #, 
-#                                       'w': {'climb': #, 'dive': #}
-#                                       'v_p': {'climb': #, 'dive':#}
-#                                       'v_g': {'climb': #, 'dive':#}
-#                                       'pitch': {'climb': #, 'dive':#}
-#                                       'roll': {'climb': #, 'dive': #}
-#                                       '} }
-for val in np.unique(prof_inds)[0:len(np.unique(prof_inds))-1]: # fill above 'dive_segs' dict with values
-    if val != np.float64('nan'): 
-        start = np.where(prof_inds==val)[0][0]
-        end = np.where(prof_inds==val)[0][-1]
-
-        d_sub = depth[start:end]
-        d_filt = d_sub > 1
-        d_sub = d_sub[d_filt]
-        d_sub = d_sub.reshape(-1,1)
-
-        t_sub = reg_time[start:start+len(d_sub)].reshape(-1,1)
-
-        r_sub_raw = roll[start:end]
-
-        model = LinearRegression()
-        model.fit(t_sub, d_sub)
-        d_pred = model.predict(t_sub)
-        w = -1*model.coef_[0][0]*np.power(10,9) # convert to m/s from m/ns
-
-        p_sub_raw = pitch[start:end]*180/np.pi
-        if -1*model.coef_[0][0] > 0:
-            p_pos = p_sub_raw > 0
-            p_sub_pos = p_sub_raw[p_pos]
-            p_sub_mean = np.nanmean(p_sub_pos)
-            pitch_means.append(p_sub_mean)
-        else:
-            p_neg = p_sub_raw < 0
-            p_sub_neg = p_sub_raw[p_neg]
-            p_sub_mean = np.nanmean(p_sub_neg)
-            pitch_means.append(p_sub_mean)
-
-        vel_along_path = w/np.cos(p_sub_mean) # ISSUE
-        vel_over_ground = w*np.tan(p_sub_mean) # ISSUE
-
-        seg_name = f'prof{val}'
-        dive_segs[seg_name] = {'start_ind':start, 'end_ind':end, 'w': w, 'v_g':vel_over_ground, 
-                               'v_p':vel_along_path}
+        self.tm = 0
+        self.depth = 0
+        self.roll = 0
+        self.pitch = 0
+        self.oil_vol = 0
+        self.pressure = 0
+        self.temp = 0
+        self.cond = 0
+        self.lat = 0
+        self.lon = 0
+        self.sea_pressure = 0
+        self.vacuum = -1
+        self.amphr = 0
+        self.data_strings = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
+                      "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : ("w = ### m/s", 14, 'r')}}
         
-        ax1.scatter(time[start:end], depth[start:end], s=1.5)
-        ax1.plot(time[start:start+len(d_sub)], d_pred, label=f"{seg_name[0:-2]} w ≈ {w:0.3f} m/s")
+        self._data = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
+                      "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : [list of values, e.g., roll]}}
+        self.units = {"w":'m/s', "pitch":'deg', "roll":'deg', "dt":'hrs', "amphr":'Ahr', "vac":'inHg'}
 
-        ax2.scatter(time[start:end], p_sub_raw, s=2, label='')
-        ax3.scatter(time[start:end], r_sub_raw, s=1, label='')
+        
+    def getWorkingDirs(self):
+        # data_dir = input("Enter the absolute file path to the binary files for your deployment (e.g., /Users/NAME/Documents/etc.): ")
+        self.data_dir = "/Users/cflaim/Documents/data/georgeSbDeployment/george-from-glider-20240913T150418/"
+        # cache_dir = (input("If your cahce files are in a separate directy than the data files, enter the absolute path to them. Other wise press enter.") or "0")
+        self.cache_dir = "/Users/cflaim/Documents/GitHub/standard-glider-files/Cache/"
 
-        w_s.append(w)
-        v_gs.append(vel_over_ground)
-        v_ps.append(vel_along_path)
+        glider = os.listdir(self.data_dir)
+        for g in glider:
+            if ".tbd" in g:
+                self.glider = g.split("-")[0]
+                break
 
-w_s = np.array(w_s) 
-v_gs = np.array(v_gs)
-v_ps = np.array(v_ps)
-pitch_means = np.array(pitch_means)
+    def inputDiveParams(self):
+        pass
 
-w_pos = w_s > 0
-w_neg = w_s < 0
-w_climb_mean = np.nanmean(w_s[w_pos])
-w_dive_mean = np.nanmean(w_s[w_neg])
+    def readRaw(self): # needs to be pointed to working directory
+        if self.cache_dir == "0":
+            dbd = dbdreader.MultiDBD(pattern=self.data_dir+'george*.[st]bd')
+        else:
+            dbd = dbdreader.MultiDBD(pattern=self.data_dir+'george*.[st]bd', cacheDir=self.cache_dir)
 
-v_p_pos = v_gs > 0
-v_p_neg = v_gs < 0
-vp_climb_mean = np.nanmean(v_gs[v_p_pos])
-vp_dive_mean = np.nanmean(v_gs[v_p_neg])
+        self.tm, self.depth, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.pressure, self.temp, self.cond, self.lat, self.lon = dbd.get_sync("m_depth", 'm_coulomb_amphr','m_vacuum','m_roll', 'm_pitch', 'm_de_oil_vol', 
+                                'sci_water_pressure', 'sci_water_temp', 'sci_water_cond', 'm_lat', 'm_lon')
+        
+        self.roll, self.pitch = self.roll*180/np.pi, self.pitch*180/np.pi # convert roll and pitch from rad to deg
+        self.sea_pressure = self.pressure * 10 - 10.1325 # convert pressure to sea pressure in dbar for GSW
+        self.cond = self.cond * 10 # convert cond from s/m to mS/cm for GSW
 
-v_g_pos = v_gs > 0
-v_g_neg = v_gs < 0
-vg_climb_mean = np.nanmean(v_gs[v_g_pos])
-vg_dive_mean = np.nanmean(v_gs[v_g_neg])
+    def makeDf(self): # look at Sam's code for example
+        _dt = np.array([dbdreader.dbdreader.epochToDateTimeStr(t, timeformat='%H:%M:%S') for t in self.tm])
+        time = np.array([t[0]+ ' ' +t[1] for t in _dt])
 
-p_pos = pitch_means > 0
-p_neg = pitch_means < 0
-p_climb_mean = np.nanmean(pitch_means[p_pos])
-p_dive_mean = np.nanmean(pitch_means[p_neg])
+        vars = [time, self.depth, self.vacuum, self.amphr, self.roll, self.pitch, self.oil_vol, self.sea_pressure, self.pressure, self.temp, self.cond, self.lat, self.lon] # variable values for pandas DF
+        columns = ['time', 'depth_m', 'vacuum', 'amphr', 'roll_deg', 'pitch_deg', 'oil_vol','sea_pressure', 'pressure', 
+                'temp', 'cond', 'lat', 'lon'] # column names for pandas df
+        df_dict = {} # empty dict to be filled 
+        # fill above dictionary
+        for i, var in enumerate(columns):
+            df_dict[var] = vars[i]
 
-# check all values if w/in range for variable
-# Have a defualt string to write to screen if nothing wrong
-# If variable or variables out of range, move to top, make bold, italic, and red
+        self.df = pd.DataFrame(df_dict) # make pandas df from dict
+        self.df['time'] = pd.to_datetime(self.df['time']) # convert the time column to DateTime type from datestrings
+    
+    def getProfiles(self):
+        """
+        Adds profile index and direction to existing Pandas DataFrame made from slocum binary data files.
+        """
+        min_dp=10.0
+        inversion=3.
+        filt_length=7
+        min_nsamples=14
 
-# write function/code to loop thru dicts of mean values and acceptable ranges
-    # produce formatted string based on acceptable or not
-    # return long string with all of the needed formatting
+        profile = self.df.pressure.values * np.nan
+        direction = self.df.pressure.values * np.nan
+        pronum = 1
+        lastpronum = 0
 
-    # OOOOORRRRRR
-    # Use as much of default string as possible
-    # only formated needed parts and truncate default string
+        good = np.where(~np.isnan(self.df.pressure))[0]
+        p = np.convolve(self.df.pressure.values[good],
+                        np.ones(filt_length) / filt_length, 'same')
+        dpall = np.diff(p)
+        inflect = np.where(dpall[:-1] * dpall[1:] < 0)[0]
+        for n, i in enumerate(inflect[:-1]):
+            nprofile = inflect[n+1] - inflect[n]
+            inds = np.arange(good[inflect[n]], good[inflect[n+1]]+1) + 1
+            dp = np.diff(self.df.pressure[inds[[-1, 0]]])
+            if ((nprofile >= min_nsamples) and (np.abs(dp) > 10)):
+                direction[inds] = np.sign(dp)
+                profile[inds] = pronum
+                lastpronum = pronum
+                pronum += 1
+            else:
+                profile[good[inflect[n]]:good[inflect[n+1]]] = lastpronum + 0.5
 
-pitch_string = f"Avg climb angle: {p_climb_mean:0.3f}°\nAvg dive angle: {p_dive_mean:0.3f}°\n\n"
-info_string = f"\
-Avg climb roll: {0}°\nAvg dive roll: {0}°\n\n\
-Avg climb w: {w_climb_mean:0.3f} m/s\nAvg dive w: {w_dive_mean:0.3f} m/s\n\n\
-Avg climb v_p: {vp_climb_mean:0.3f} m/s\nAvg dive v_p: {vp_dive_mean:0.3f} m/s\n\n\
-Avg climb v_g: {vg_climb_mean:0.3f} m/s\nAvg dive v_g: {vg_dive_mean:0.3f} m/s\n\n\
-Estimated distance traveled: {2}\n\
-GPS distance traveled: {0}\n\n"
+        self.df['profile_index'] = profile
+        self.df['profile_direction'] = direction
 
-ax4.text(0.05, 0.98, pitch_string, verticalalignment='top', c = 'r')
-ax4.text(0.05, 0.91, info_string, verticalalignment='top')
+    def calcDensitySA(self):
+        # calculate water density
+        sp = gsw.conversions.SP_from_C(self.cond, self.temp, self.sea_pressure) # calculate practical sal from conductivity
+        sa = gsw.conversions.SA_from_SP(sp, self.sea_pressure, lon=np.nanmean(self.lon), lat=np.nanmean(self.lat)) # calculate absolute salinity from practical sal and lat/lon
+        pt = gsw.conversions.pt0_from_t(sa, self.temp, self.sea_pressure) # calculate potential temperature from salinity and temp
+        ct = gsw.conversions.CT_from_pt(sa, pt) # calculate critical temperature from potential temperature
+        rho = gsw.density.rho(sa, ct, self.sea_pressure) # calculate density from absolute sal, critical temp, and pressure
 
-apogees, _ = sp.signal.find_peaks(depth, height=(-10, None))
+        self.df['density'] = rho
+        self.df['salinity'] = sa
 
-ax1.legend(loc="lower left", ncol=3)
-plt.xticks(rotation=15)
-plt.tight_layout()
-# plt.savefig('test.png')
-plt.show()
+    def calcW(self):
+        prof_inds = self.df.profile_index.values
+        t = np.float64(self.df.time.values)
+
+        for val in np.unique(prof_inds)[0:len(np.unique(prof_inds))-1]:
+            if val != np.float64('nan'):
+                start = np.where(prof_inds==val)[0][0]
+                end = np.where(prof_inds==val)[0][-1]
+
+                d_sub = self.df.depth_m.values[start:end]
+                d_filt = d_sub > 1
+                d_sub = d_sub[d_filt]
+                d_sub = d_sub.reshape(-1,1)
+
+                t_sub = t[start:start+len(d_sub)].reshape(-1,1)
+
+                model = LinearRegression()
+                model.fit(t_sub, d_sub)
+                d_pred = model.predict(t_sub)
+                w = -1*model.coef_[0][0]*np.power(10,9) # convert to m/s from m/ns
+
+    def makeDataDisplayStrings(self):
+        keys = self.data_strings.keys()
+        for key in keys:
+            sub_keys = self.data_strings[key].keys()
+            for sub_key in sub_keys:
+                self.data_strings[key][sub_key].append(f"{sub_key}: {np.nanmean(self._data[key][sub_key]):0.3f} {self.units[sub_key]}")
+                self.data_strings[key][sub_key].append(14)
+                self.data_strings[key][sub_key].append('k')
+
+    def makePlots(self): # needs to be pointed to a save directory
+        fig = plt.figure(constrained_layout = True, figsize=(11, 8.5))
+        gs = fig.add_gridspec(6, 7)
+        ax1 = fig.add_subplot(gs[0:3, :5])
+        ax2 = fig.add_subplot(gs[4, :5], sharex=ax1)
+        ax3 = fig.add_subplot(gs[5, :5], sharex=ax2)
+        ax4 = fig.add_subplot(gs[2:, 5:], fc='wheat', alpha=0.5)
+        ax5 = fig.add_subplot(gs[:2, 5:], fc='wheat', alpha=0.5)
+
+        ax3.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+        for label in ax3.get_xticklabels(which='major'):
+            label.set(rotation=15, horizontalalignment='center')
+
+        ax1.xaxis.set_tick_params(labelbottom=False)
+        ax2.xaxis.set_tick_params(labelbottom=False)
+        ax4.xaxis.set_tick_params(labelbottom=False)
+        ax4.yaxis.set_tick_params(labelleft=False)
+        ax4.set_xticks([])
+        ax4.set_yticks([])
+        ax5.xaxis.set_tick_params(labelbottom=False)
+        ax5.yaxis.set_tick_params(labelleft=False)
+        ax5.set_xticks([])
+        ax5.set_yticks([])
+
+        ax1.set_title(f"{self.glider} profiles {np.unique(self.df.profile_index)[0]} - {np.unique(self.df.profile_index)[-2]}")
+        ax1.invert_yaxis()
+        ax1.set_ylabel("Depth [m]")
+        ax2.set_ylabel("Pitch [deg]")
+        ax3.set_ylabel("Roll [deg]")
+        ax3.set_xlabel("Time")
+
+        d_plot = ax1.scatter(self.df.time, self.df.depth_m, c=self.df.density,s=1.5)
+        ax2.plot(self.df.time, self.df.pitch_deg)
+        ax3.plot(self.df.time, self.df.roll_deg)
+        cax = fig.add_axes((4/7-1/2, 11/24, 15/24, .05))
+        fig.colorbar(d_plot, cax=cax, orientation='horizontal', label='Density [kg/$m^3$]')
+
+        _keys = self.data_strings.keys()
+        for i, key in enumerate(_keys):
+            sub_keys = self.data_strings[key].keys()
+            ax4.text(0.03, 0.98-i*0.5, f"Avg {key}", verticalalignment='top', fontsize=15, c = 'k')
+
+            for j, sub_key in enumerate(sub_keys):
+                ax4.text(0.08, 0.93-i*0.5-j*0.05, f"{self.data_strings[key][sub_key][0]}", verticalalignment='top', 
+                         fontsize=self.data_strings[key][sub_key][1], c = self.data_strings[key][sub_key][2])
+
+        # ax4.text(0.03, 0.98, "Avg dive", verticalalignment='top', c = 'k')
+        ax5.text(0.03, 0.95, f"Bat %: {100-np.max(self.df.amphr)/self.max_amphrs:0.2f}\
+                 \n\nAmphr: {np.max(self.df.amphr):0.2f}\
+                 \n\n# dives: {len(np.unique(self.df.profile_index))//2}", 
+                 verticalalignment='top', c = 'k', fontsize=16)
+
+        plt.show()
+    
+    def makeSegmentedDf(self): # make this the data string function????
+        prof_inds = self.df.profile_index.values
+        depth = self.df.depth_m.values
+        t = np.float64(self.df.time.values)
+        time = self.df.time.values
+        roll = self.df.roll_deg.values
+        pitch = self.df.pitch_deg.values
+        amphr = self.df.amphr.values
+        vac = self.df.vacuum.values
+
+        sub_keys = ["w", "pitch", "roll", "dt", "amphr", "vac"]
+
+        for val in np.unique(prof_inds)[0:len(np.unique(prof_inds))-1]: # fill above 'dive_segs' dict with values
+            if val != np.float64('nan'): 
+                start = np.where(prof_inds==val)[0][0]
+                end = np.where(prof_inds==val)[0][-1]
+
+                d_sub = depth[start:end]
+                d_filt = d_sub > 1
+                d_sub = d_sub[d_filt]
+                d_sub = d_sub.reshape(-1,1)
+
+                t_sub = t[start:start+len(d_sub)].reshape(-1,1)
+                _t = t[start:start+len(d_sub)]
+                dt = np.max(_t) - np.min(_t); dt = dt/10**9/3600
+                r_mean = np.nanmean(roll[start:end])
+                p_mean = np.nanmean(pitch[start:end])
+                a =  amphr[start:end]
+                da = np.max(a) - np.min(a)
+                _vac = vac[start:start+len(d_sub)]
+                vac_mean = np.mean(_vac)
+
+                model = LinearRegression()
+                model.fit(t_sub, d_sub)
+                d_pred = model.predict(t_sub)
+                w = -1*model.coef_[0][0]*np.power(10,9) # convert to m/s from m/ns
+
+                p_sub_raw = pitch[start:end]
+                _vars = {"w":w, "pitch":p_mean, "roll":r_mean, "dt":dt, "amphr":da, "vac": vac_mean}
+
+                if w > 0:
+                    parent_key = "climb"
+                else:
+                    parent_key = "dive"
+
+                for sub_key in sub_keys:
+                    self._data[parent_key][sub_key].append(float(_vars[sub_key]))
+
+    def run(self):
+        self.getWorkingDirs()
+        self.readRaw()
+        self.makeDf()
+        self.getProfiles()
+        self.calcDensitySA()
+        self.calcW()
+        self.makeSegmentedDf()
+        self.makeDataDisplayStrings()
+        self.makePlots()
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def getWorkingDir():
-    pass
-
-def inputDiveParams():
-    pass
-
-def loadRaw(): # needs to be pointed to working directory
-    pass
-
-def convRaw(): # look at Sam's code for example
-    pass
-
-def smoothData(): # rolling average?
-    pass
-
-def makePlots(): # needs to be pointed to a save directory
-    pass
-
-def run():
-    loadRaw()
-    convRaw()
-    smoothData()
-    makePlots()
-
-
-if __name__ == "plotGliderPlots":
-    run()
+if __name__ == "__main__":
+    data = gliderData()
+    data.run()
+# data = gliderData()
+# data.run()
