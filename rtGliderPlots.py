@@ -8,6 +8,7 @@ import scipy as sp
 from sklearn.linear_model import LinearRegression
 import gsw
 import matplotlib.dates as mdates
+import cmocean.cm as cmo
 
 class gliderData:
     def __init__(self):
@@ -29,6 +30,9 @@ class gliderData:
         self.sea_pressure = 0
         self.vacuum = -1
         self.amphr = 0
+        self.o2 = 0
+        self.cdom = 0
+        self.chlor = 0
         self.data_strings = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
                       "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : ("w = ### m/s", 14, 'r')}}
         
@@ -58,20 +62,30 @@ class gliderData:
         else:
             dbd = dbdreader.MultiDBD(pattern=self.data_dir+'george*.[st]bd', cacheDir=self.cache_dir)
 
-        self.tm, self.depth, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.pressure, self.temp, self.cond, self.lat, self.lon = dbd.get_sync("m_depth", 'm_coulomb_amphr','m_vacuum','m_roll', 'm_pitch', 'm_de_oil_vol', 
+        self.tm, self.depth, self.chlor, self.cdom, self.o2, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.pressure, self.temp, self.cond, self.lat, self.lon = dbd.get_sync("m_depth", 'sci_flbbcd_chlor_units', 'sci_flbbcd_cdom_units','sci_oxy4_oxygen','m_coulomb_amphr','m_vacuum','m_roll', 'm_pitch', 'm_de_oil_vol', 
                                 'sci_water_pressure', 'sci_water_temp', 'sci_water_cond', 'm_lat', 'm_lon')
         
         self.roll, self.pitch = self.roll*180/np.pi, self.pitch*180/np.pi # convert roll and pitch from rad to deg
         self.sea_pressure = self.pressure * 10 - 10.1325 # convert pressure to sea pressure in dbar for GSW
         self.cond = self.cond * 10 # convert cond from s/m to mS/cm for GSW
 
+        # Uncomment to print out available sci and eng variables
+        # print("we the following science parameters:")
+        # for i,p in enumerate(dbd.parameterNames['sci']):
+        #     print("%2d: %s"%(i,p))
+        # print("\n and engineering paramters:")
+        # for i,p in enumerate(dbd.parameterNames['eng']):
+        #     print("%2d: %s"%(i,p))
+
     def makeDf(self): # look at Sam's code for example
         _dt = np.array([dbdreader.dbdreader.epochToDateTimeStr(t, timeformat='%H:%M:%S') for t in self.tm])
         time = np.array([t[0]+ ' ' +t[1] for t in _dt])
 
-        vars = [time, self.depth, self.vacuum, self.amphr, self.roll, self.pitch, self.oil_vol, self.sea_pressure, self.pressure, self.temp, self.cond, self.lat, self.lon] # variable values for pandas DF
-        columns = ['time', 'depth_m', 'vacuum', 'amphr', 'roll_deg', 'pitch_deg', 'oil_vol','sea_pressure', 'pressure', 
+        vars = [self.tm, self.depth, self.chlor, self.cdom, self.o2, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.sea_pressure, self.pressure, self.temp, 
+                self.cond, self.lat, self.lon] # variable values for pandas DF
+        columns = ['time', 'depth_m', 'chlorophyl', 'cdom', 'oxygen', 'amphr', 'vacuum', 'roll_deg', 'pitch_deg', 'oil_vol','sea_pressure', 'pressure', 
                 'temp', 'cond', 'lat', 'lon'] # column names for pandas df
+        
         df_dict = {} # empty dict to be filled 
         # fill above dictionary
         for i, var in enumerate(columns):
@@ -121,9 +135,13 @@ class gliderData:
         pt = gsw.conversions.pt0_from_t(sa, self.temp, self.sea_pressure) # calculate potential temperature from salinity and temp
         ct = gsw.conversions.CT_from_pt(sa, pt) # calculate critical temperature from potential temperature
         rho = gsw.density.rho(sa, ct, self.sea_pressure) # calculate density from absolute sal, critical temp, and pressure
+        sigma = gsw.sigma0(sa, ct)
 
         self.df['density'] = rho
-        self.df['salinity'] = sa
+        self.df['absolute_salinity'] = sa
+        self.df['potential_temperature'] = pt
+        self.df['sigma'] = sigma
+        self.df['conservative_temperature'] = ct
 
     def calcW(self):
         prof_inds = self.df.profile_index.values
@@ -155,7 +173,7 @@ class gliderData:
                 self.data_strings[key][sub_key].append(14)
                 self.data_strings[key][sub_key].append('k')
 
-    def makePlots(self): # needs to be pointed to a save directory
+    def makeFlightPlots(self): # needs to be pointed to a save directory
         fig = plt.figure(constrained_layout = True, figsize=(11, 8.5))
         gs = fig.add_gridspec(6, 7)
         ax1 = fig.add_subplot(gs[0:3, :5])
@@ -190,7 +208,7 @@ class gliderData:
         ax2.plot(self.df.time, self.df.pitch_deg)
         ax3.plot(self.df.time, self.df.roll_deg)
         cax = fig.add_axes((4/7-1/2, 11/24, 15/24, .05))
-        fig.colorbar(d_plot, cax=cax, orientation='horizontal', label='Density [kg/$m^3$]')
+        fig.colorbar(d_plot, cax=cax, orientation='horizontal', label='Density [kg $\\bullet m^{-3}$]')
 
         _keys = self.data_strings.keys()
         for i, key in enumerate(_keys):
@@ -206,6 +224,32 @@ class gliderData:
                  \n\nAmphr: {np.max(self.df.amphr):0.2f}\
                  \n\n# dives: {len(np.unique(self.df.profile_index))//2}", 
                  verticalalignment='top', c = 'k', fontsize=16)
+
+        plt.show()
+    
+    def makeSciPlots(self):
+        # code adapted from Jacob Partida
+        fig = plt.figure(constrained_layout = True, figsize=(15, 8.5))
+        gs = fig.add_gridspec(6, 7)
+        ax1 = fig.add_subplot(gs[0:, 0:3])
+        ax2 = fig.add_subplot(gs[0:2, 3:])
+        ax3 = fig.add_subplot(gs[2:4, 3:])
+        ax4 = fig.add_subplot(gs[4:, 3:])
+
+        s_lims = (np.floor(data.df.absolute_salinity.min()-0.5),
+           np.ceil(data.df.absolute_salinity.max()+0.5))
+        t_lims = (np.floor(data.df.conservative_temperature.min()-0.5),
+                np.ceil(data.df.conservative_temperature.max()+0.5))
+
+        S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
+        T = np.arange(t_lims[0],t_lims[1]+0.1,0.1)
+        Tg, Sg = np.meshgrid(T,S)
+        sigma = gsw.sigma0(Sg,Tg)
+
+        c0 = ax1.contour(Sg, Tg, sigma, colors='grey', zorder=1)
+        c0l = plt.clabel(c0, colors='k', fontsize=9)
+        p0 = ax1.scatter(self.df.absolute_salinity, self.df.conservative_temperature, c=self.df.oxygen, cmap=cmo.tempo)
+        cbar0 = fig.colorbar(p0, label="Oxygen [$mL \\bullet L^{-1}$]")
 
         plt.show()
     
@@ -266,7 +310,8 @@ class gliderData:
         self.calcW()
         self.makeSegmentedDf()
         self.makeDataDisplayStrings()
-        self.makePlots()
+        # self.makeFlightPlots()
+        self.makeSciPlots()
 
 
 if __name__ == "__main__":
