@@ -68,7 +68,7 @@ class gliderData:
         self.roll, self.pitch = self.roll*180/np.pi, self.pitch*180/np.pi # convert roll and pitch from rad to deg
         self.sea_pressure = self.pressure * 10 - 10.1325 # convert pressure to sea pressure in dbar for GSW
         self.cond = self.cond * 10 # convert cond from s/m to mS/cm for GSW
-
+        print(self.tm)
         # Uncomment to print out available sci and eng variables
         # print("we the following science parameters:")
         # for i,p in enumerate(dbd.parameterNames['sci']):
@@ -81,7 +81,7 @@ class gliderData:
         _dt = np.array([dbdreader.dbdreader.epochToDateTimeStr(t, timeformat='%H:%M:%S') for t in self.tm])
         time = np.array([t[0]+ ' ' +t[1] for t in _dt])
 
-        vars = [self.tm, self.depth, self.chlor, self.cdom, self.o2, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.sea_pressure, self.pressure, self.temp, 
+        vars = [time, self.depth, self.chlor, self.cdom, self.o2, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.sea_pressure, self.pressure, self.temp, 
                 self.cond, self.lat, self.lon] # variable values for pandas DF
         columns = ['time', 'depth_m', 'chlorophyl', 'cdom', 'oxygen', 'amphr', 'vacuum', 'roll_deg', 'pitch_deg', 'oil_vol','sea_pressure', 'pressure', 
                 'temp', 'cond', 'lat', 'lon'] # column names for pandas df
@@ -91,9 +91,11 @@ class gliderData:
         for i, var in enumerate(columns):
             df_dict[var] = vars[i]
 
+
         self.df = pd.DataFrame(df_dict) # make pandas df from dict
         self.df['time'] = pd.to_datetime(self.df['time']) # convert the time column to DateTime type from datestrings
-    
+        print(self.df.time)
+
     def getProfiles(self):
         """
         Adds profile index and direction to existing Pandas DataFrame made from slocum binary data files.
@@ -236,6 +238,13 @@ class gliderData:
         ax3 = fig.add_subplot(gs[2:4, 3:])
         ax4 = fig.add_subplot(gs[4:, 3:])
 
+        ax2.invert_yaxis()
+        ax3.invert_yaxis()
+        ax4.invert_yaxis()
+
+        ax1.set_xlabel("Salinity [$g \\bullet kg^{-1}$]", fontsize=14)
+        ax1.set_ylabel("Temperature [°C]", fontsize=14)
+
         s_lims = (np.floor(data.df.absolute_salinity.min()-0.5),
            np.ceil(data.df.absolute_salinity.max()+0.5))
         t_lims = (np.floor(data.df.conservative_temperature.min()-0.5),
@@ -249,7 +258,17 @@ class gliderData:
         c0 = ax1.contour(Sg, Tg, sigma, colors='grey', zorder=1)
         c0l = plt.clabel(c0, colors='k', fontsize=9)
         p0 = ax1.scatter(self.df.absolute_salinity, self.df.conservative_temperature, c=self.df.oxygen, cmap=cmo.tempo)
-        cbar0 = fig.colorbar(p0, label="Oxygen [$mL \\bullet L^{-1}$]")
+        cbar0 = fig.colorbar(p0, label="Oxygen [$mL \\bullet L^{-1}$]", location='left')
+
+        ax2.scatter(self.df.time, self.df.depth_m, c=self.df.oxygen, cmap=cmo.tempo, s=2)
+        ax3.scatter(self.df.time, self.df.depth_m, c=self.df.cdom, cmap=cmo.turbid,s=2)
+        ax4.scatter(self.df.time, self.df.depth_m, c=self.df.chlorophyl, cmap=cmo.algae, s=2)
+
+        ax2.xaxis.set_tick_params(labelbottom=False)
+        ax3.xaxis.set_tick_params(labelbottom=False)
+        ax4.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+        for label in ax4.get_xticklabels(which='major'):
+            label.set(rotation=15, horizontalalignment='center')
 
         plt.show()
     
@@ -310,7 +329,7 @@ class gliderData:
         self.calcW()
         self.makeSegmentedDf()
         self.makeDataDisplayStrings()
-        # self.makeFlightPlots()
+        self.makeFlightPlots()
         self.makeSciPlots()
 
 
