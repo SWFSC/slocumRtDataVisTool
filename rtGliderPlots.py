@@ -9,6 +9,10 @@ from sklearn.linear_model import LinearRegression
 import gsw
 import matplotlib.dates as mdates
 import cmocean.cm as cmo
+from mpl_toolkits.basemap import Basemap
+import pickle
+from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes
+from mpl_toolkits.axes_grid1.inset_locator import mark_inset
 
 class gliderData:
     def __init__(self):
@@ -33,19 +37,22 @@ class gliderData:
         self.o2 = 0
         self.cdom = 0
         self.chlor = 0
+        self.problem_dives = []
         self.data_strings = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
                       "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : ("w = ### m/s", 14, 'r')}}
-        
+
         self._data = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
                       "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : [list of values, e.g., roll]}}
         self.units = {"w":'m/s', "pitch":'deg', "roll":'deg', "dt":'hrs', "amphr":'Ahr', "vac":'inHg'}
+        self.acceptable_ranges = {"dive":{"w":[-0.08, -0.20], "pitch":[-20, -29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]},
+                                  "climb":{"w":[0.08, 0.20], "pitch":[20, 29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]}}
 
         
     def getWorkingDirs(self):
         # data_dir = input("Enter the absolute file path to the binary files for your deployment (e.g., /Users/NAME/Documents/etc.): ")
-        self.data_dir = "/Users/cflaim/Documents/data/georgeSbDeployment/george-from-glider-20240913T150418/"
+        self.data_dir = "data/processed/"
         # cache_dir = (input("If your cahce files are in a separate directy than the data files, enter the absolute path to them. Other wise press enter.") or "0")
-        self.cache_dir = "/Users/cflaim/Documents/GitHub/standard-glider-files/Cache/"
+        self.cache_dir = "cache/"
 
         glider = os.listdir(self.data_dir)
         for g in glider:
@@ -171,9 +178,32 @@ class gliderData:
         for key in keys:
             sub_keys = self.data_strings[key].keys()
             for sub_key in sub_keys:
-                self.data_strings[key][sub_key].append(f"{sub_key}: {np.nanmean(self._data[key][sub_key]):0.3f} {self.units[sub_key]}")
-                self.data_strings[key][sub_key].append(14)
-                self.data_strings[key][sub_key].append('k')
+                var_vals = self._data[key][sub_key]
+                var_mean = np.nanmean(self._data[key][sub_key])
+                var_max = np.max(self._data[key][sub_key])
+                var_min = np.min(self._data[key][sub_key])
+
+                low_thresh = np.min(self.acceptable_ranges[key][sub_key])
+                high_thresh = np.max(self.acceptable_ranges[key][sub_key])
+                if var_mean > low_thresh and var_mean < high_thresh:
+                    self.data_strings[key][sub_key].append(f"{sub_key}: {np.nanmean(self._data[key][sub_key]):0.3f} {self.units[sub_key]}")
+                    self.data_strings[key][sub_key].append(14)
+                    self.data_strings[key][sub_key].append('k')
+                    self.data_strings[key][sub_key].append('normal')
+                    self.data_strings[key][sub_key].append('normal')
+
+                else:
+                    self.data_strings[key][sub_key].append(f"{sub_key}: {np.nanmean(self._data[key][sub_key]):0.3f} {self.units[sub_key]}")
+                    self.data_strings[key][sub_key].append(14)
+                    self.data_strings[key][sub_key].append('r')
+                    self.data_strings[key][sub_key].append('italic')
+                    self.data_strings[key][sub_key].append('bold')
+                
+                if var_min < low_thresh or var_max > high_thresh:
+                    if key == "dive":
+                        self.problem_dives.append(f"{self._data[key][sub_key].index(var_max) + 1}")
+                    else:
+                        self.problem_dives.append(f"{self._data[key][sub_key].index(var_max) + 2}")
 
     def makeFlightPlots(self): # needs to be pointed to a save directory
         fig = plt.figure(constrained_layout = True, figsize=(11, 8.5))
@@ -219,12 +249,14 @@ class gliderData:
 
             for j, sub_key in enumerate(sub_keys):
                 ax4.text(0.08, 0.93-i*0.5-j*0.05, f"{self.data_strings[key][sub_key][0]}", verticalalignment='top', 
-                         fontsize=self.data_strings[key][sub_key][1], c = self.data_strings[key][sub_key][2])
+                         fontsize=self.data_strings[key][sub_key][1], c = self.data_strings[key][sub_key][2], 
+                         fontstyle=self.data_strings[key][sub_key][3], fontweight=self.data_strings[key][sub_key][4])
 
         # ax4.text(0.03, 0.98, "Avg dive", verticalalignment='top', c = 'k')
         ax5.text(0.03, 0.95, f"Bat %: {100-np.max(self.df.amphr)/self.max_amphrs:0.2f}\
                  \n\nAmphr: {np.max(self.df.amphr):0.2f}\
-                 \n\n# dives: {len(np.unique(self.df.profile_index))//2}", 
+                 \n\n# dives: {len(np.unique(self.df.profile_index))//2}\
+                 \n\nProblem profiles: \n{np.unique(self.problem_dives)}", 
                  verticalalignment='top', c = 'k', fontsize=16)
 
         plt.show()
@@ -235,15 +267,16 @@ class gliderData:
         gs = fig.add_gridspec(6, 7)
         ax1 = fig.add_subplot(gs[0:, 0:3])
         ax2 = fig.add_subplot(gs[0:2, 3:])
-        ax3 = fig.add_subplot(gs[2:4, 3:])
-        ax4 = fig.add_subplot(gs[4:, 3:])
+        # ax4 = fig.add_subplot(gs[4:, 3:])
 
         ax2.invert_yaxis()
-        ax3.invert_yaxis()
-        ax4.invert_yaxis()
+        # ax3.invert_yaxis()
+        # ax4.invert_yaxis()
 
         ax1.set_xlabel("Salinity [$g \\bullet kg^{-1}$]", fontsize=14)
         ax1.set_ylabel("Temperature [°C]", fontsize=14)
+        ax2.set_xlabel("Time", fontsize=14)
+        ax2.set_ylabel("Depth [m]", fontsize=14)
 
         s_lims = (np.floor(data.df.absolute_salinity.min()-0.5),
            np.ceil(data.df.absolute_salinity.max()+0.5))
@@ -261,14 +294,69 @@ class gliderData:
         cbar0 = fig.colorbar(p0, label="Oxygen [$mL \\bullet L^{-1}$]", location='left')
 
         ax2.scatter(self.df.time, self.df.depth_m, c=self.df.oxygen, cmap=cmo.tempo, s=2)
-        ax3.scatter(self.df.time, self.df.depth_m, c=self.df.cdom, cmap=cmo.turbid,s=2)
-        ax4.scatter(self.df.time, self.df.depth_m, c=self.df.chlorophyl, cmap=cmo.algae, s=2)
-
-        ax2.xaxis.set_tick_params(labelbottom=False)
-        ax3.xaxis.set_tick_params(labelbottom=False)
-        ax4.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
-        for label in ax4.get_xticklabels(which='major'):
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+        for label in ax2.get_xticklabels(which='major'):
             label.set(rotation=15, horizontalalignment='center')
+        
+        ax3 = fig.add_subplot(gs[2:, 3:])
+        ax3.set_xlabel('\n\n\nLongitude [Deg]', fontsize=14)
+        ax3.set_ylabel('Latitude [Deg]\n\n\n', fontsize=14)
+        glider_lon, glider_lat = self.df.lon, self.df.lat
+        glider_lon_min = np.min(self.df.lon)
+        glider_lon_max = np.max(self.df.lon)
+        glider_lat_min = np.min(self.df.lat)
+        glider_lat_max = np.max(self.df.lat)
+        glider_lon_mean = np.nanmean(glider_lon)
+        glider_lat_mean = np.nanmean(glider_lat)
+        
+        lon_range = glider_lon_max-glider_lon_min
+        lat_range = glider_lat_max-glider_lat_min
+
+        if f"{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}" in os.listdir("mapPickles/"):
+            with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}", "rb") as fd:
+                map = pickle.load(fd)
+        else:
+            map = Basemap(llcrnrlon=glider_lon_min-.05, llcrnrlat=glider_lat_min-.01,
+                        urcrnrlon=glider_lon_max+.01, urcrnrlat=glider_lat_max+.05, resolution='f') # create map object
+            with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}", "wb") as fd:
+                pickle.dump(map, fd, protocol=-1)
+
+        map.drawcoastlines()
+        map.drawcountries()
+        # map.bluemarble()
+        map.fillcontinents('#e0b479')
+        map.drawlsmask(ocean_color = "#7bcbe3", resolution='f')
+        map.drawparallels(np.linspace(glider_lat_min, glider_lat_max, 5), labels=[1,0,0,1], fmt="%0.2f")
+        map.drawmeridians(np.linspace(glider_lon_min, glider_lon_max, 5), labels=[1,0,0,1], fmt="%0.3f", rotation=20)
+        x, y = map(glider_lon, glider_lat)
+        map.scatter(x, y, c=self.df.oxygen, s=3, cmap=cmo.tempo)
+
+
+        axins = zoomed_inset_axes(ax3, 0.01, loc='upper left')
+        axins.set_xlim(glider_lon_min-3, glider_lon_max+3)
+        axins.set_ylim(glider_lat_min-3, glider_lat_max+3)
+
+        if f"{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset" in os.listdir("mapPickles/"):
+            with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset", "rb") as fd:
+                map_in = pickle.load(fd)
+        else:
+            map_in = Basemap(llcrnrlon=glider_lon_min-3, llcrnrlat=glider_lat_min-3,
+                        urcrnrlon=glider_lon_max+3, urcrnrlat=glider_lat_max+3, resolution='f') # create map object
+            with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset", "wb") as fd:
+                pickle.dump(map_in, fd, protocol=-1)
+
+        map_in.drawcoastlines()
+        map_in.drawcountries()
+        map_in.fillcontinents('#e0b479')
+
+        # map.drawparallels(np.linspace(glider_lat_min-3, glider_lat_max+3, 5), labels=[1,0,0,1], fmt="%0.2f")
+        # map.drawmeridians(np.linspace(glider_lon_min-3, glider_lon_max+3, 5), labels=[1,0,0,1], fmt="%0.3f", rotation=20)
+        # map.bluemarble()
+        map_in.drawlsmask(ocean_color = "#7bcbe3", resolution='f')
+        x, y = map_in(glider_lon_mean, glider_lat_mean)
+        map_in.scatter(x, y, c='r', s=5)
+        map_in.scatter(x, y, c='r', s=100, alpha=0.25)
+        # mark_inset(ax3, axins, loc1=2, loc2=4, fc="none", ec="0.5")
 
         plt.show()
     
