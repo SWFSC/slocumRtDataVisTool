@@ -1,3 +1,4 @@
+# Data modules
 import numpy as np
 import pandas as pd
 import xarray as xr 
@@ -5,6 +6,7 @@ import dbdreader
 import matplotlib.pyplot as plt
 import os
 import scipy as sp
+from scipy import odr
 from sklearn.linear_model import LinearRegression
 import gsw
 import matplotlib.dates as mdates
@@ -13,13 +15,32 @@ from mpl_toolkits.basemap import Basemap
 import pickle
 from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes
 from mpl_toolkits.axes_grid1.inset_locator import mark_inset
+from datetime import datetime
+import zipfile
+
+# Email modules
+import email, smtplib, ssl
+from email import encoders
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+def zipdir(path, ziph):
+    # ziph is zipfile handle
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            ziph.write(os.path.join(root, file), 
+                       os.path.relpath(os.path.join(root, file), 
+                                       os.path.join(path, '..')))
 
 class gliderData:
     def __init__(self):
         self.data_dir = ""
         self.cache_dir = ""
         self.glider = ""
+        self.date = ""
         self.max_amphrs = 300
+        self.n_yos = -1
 
         self.tm = 0
         self.depth = 0
@@ -37,20 +58,29 @@ class gliderData:
         self.o2 = 0
         self.cdom = 0
         self.chlor = 0
+        self.backscatter = 0
+        self.this_call = "call_0"
+
         self.problem_dives = []
+        self.profiles_to_make = {"profile0":["cdom"],
+                                 "profile1":["absolute_salinity", "temp", "sigma"],
+                                 "profile2":["oxygen"],
+                                 "profile3":["chlorophyl"]}
+        self.sci_vars = ["cdom", "chlorophyl", "oxygen", "backscatter"]
+        self.sci_colors = {"cdom":cmo.solar, "chlorophyl": cmo.algae, "oxygen":cmo.tempo, "backscatter":cmo.haline}
+
         self.data_strings = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
                       "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : ("w = ### m/s", 14, 'r')}}
 
         self._data = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
                       "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : [list of values, e.g., roll]}}
-        self.units = {"w":'m/s', "pitch":'deg', "roll":'deg', "dt":'hrs', "amphr":'Ahr', "vac":'inHg'}
+        self.units = {"w":'m/s', "pitch":'deg', "roll":'deg', "dt":'hrs', "amphr":'Ahr', "vac":'inHg', "cdom":"nanometers", "chlorophyl":"µmol•$m^{-2}$", "oxygen":"mL•$L^{-1}$", "backscatter":"$m^{-1}$"}
         self.acceptable_ranges = {"dive":{"w":[-0.08, -0.20], "pitch":[-20, -29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]},
                                   "climb":{"w":[0.08, 0.20], "pitch":[20, 29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]}}
-
-        
+      
     def getWorkingDirs(self):
         # data_dir = input("Enter the absolute file path to the binary files for your deployment (e.g., /Users/NAME/Documents/etc.): ")
-        self.data_dir = "data/processed/"
+        self.data_dir = "data/new_data/"
         # cache_dir = (input("If your cahce files are in a separate directy than the data files, enter the absolute path to them. Other wise press enter.") or "0")
         self.cache_dir = "cache/"
 
@@ -60,22 +90,20 @@ class gliderData:
                 self.glider = g.split("-")[0]
                 break
 
-    def inputDiveParams(self):
-        pass
-
     def readRaw(self): # needs to be pointed to working directory
         if self.cache_dir == "0":
-            dbd = dbdreader.MultiDBD(pattern=self.data_dir+'george*.[st]bd')
+            dbd = dbdreader.MultiDBD(pattern=self.data_dir+'*.[st]bd')
         else:
-            dbd = dbdreader.MultiDBD(pattern=self.data_dir+'george*.[st]bd', cacheDir=self.cache_dir)
+            dbd = dbdreader.MultiDBD(pattern=self.data_dir+'*.[st]bd', cacheDir=self.cache_dir)
 
-        self.tm, self.depth, self.chlor, self.cdom, self.o2, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.pressure, self.temp, self.cond, self.lat, self.lon = dbd.get_sync("m_depth", 'sci_flbbcd_chlor_units', 'sci_flbbcd_cdom_units','sci_oxy4_oxygen','m_coulomb_amphr','m_vacuum','m_roll', 'm_pitch', 'm_de_oil_vol', 
+        self.tm, self.depth, self.backscatter, self.chlor, self.cdom, self.o2, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.pressure, self.temp, self.cond, self.lat, self.lon = dbd.get_sync("m_depth", 'sci_flbbcd_bb_units','sci_flbbcd_chlor_units', 'sci_flbbcd_cdom_units','sci_oxy4_oxygen','m_coulomb_amphr','m_vacuum','m_roll', 'm_pitch', 'm_de_oil_vol', 
                                 'sci_water_pressure', 'sci_water_temp', 'sci_water_cond', 'm_lat', 'm_lon')
         
         self.roll, self.pitch = self.roll*180/np.pi, self.pitch*180/np.pi # convert roll and pitch from rad to deg
         self.sea_pressure = self.pressure * 10 - 10.1325 # convert pressure to sea pressure in dbar for GSW
         self.cond = self.cond * 10 # convert cond from s/m to mS/cm for GSW
-        print(self.tm)
+        
+
         # Uncomment to print out available sci and eng variables
         # print("we the following science parameters:")
         # for i,p in enumerate(dbd.parameterNames['sci']):
@@ -88,9 +116,9 @@ class gliderData:
         _dt = np.array([dbdreader.dbdreader.epochToDateTimeStr(t, timeformat='%H:%M:%S') for t in self.tm])
         time = np.array([t[0]+ ' ' +t[1] for t in _dt])
 
-        vars = [time, self.depth, self.chlor, self.cdom, self.o2, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.sea_pressure, self.pressure, self.temp, 
+        vars = [time, self.depth, self.backscatter, self.chlor, self.cdom, self.o2, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.sea_pressure, self.pressure, self.temp, 
                 self.cond, self.lat, self.lon] # variable values for pandas DF
-        columns = ['time', 'depth_m', 'chlorophyl', 'cdom', 'oxygen', 'amphr', 'vacuum', 'roll_deg', 'pitch_deg', 'oil_vol','sea_pressure', 'pressure', 
+        columns = ['time', 'depth_m', 'backscatter', 'chlorophyl', 'cdom', 'oxygen', 'amphr', 'vacuum', 'roll_deg', 'pitch_deg', 'oil_vol','sea_pressure', 'pressure', 
                 'temp', 'cond', 'lat', 'lon'] # column names for pandas df
         
         df_dict = {} # empty dict to be filled 
@@ -101,7 +129,8 @@ class gliderData:
 
         self.df = pd.DataFrame(df_dict) # make pandas df from dict
         self.df['time'] = pd.to_datetime(self.df['time']) # convert the time column to DateTime type from datestrings
-        print(self.df.time)
+        self.date = np.max(self.df.time)
+        self.date = datetime.strftime(self.date, "%Y-%b-%d")
 
     def getProfiles(self):
         """
@@ -136,6 +165,7 @@ class gliderData:
 
         self.df['profile_index'] = profile
         self.df['profile_direction'] = direction
+        self.n_yos = np.max(self.df.profile_index)
 
     def calcDensitySA(self):
         # calculate water density
@@ -205,7 +235,7 @@ class gliderData:
                     else:
                         self.problem_dives.append(f"{self._data[key][sub_key].index(var_max) + 2}")
 
-    def makeFlightPlots(self): # needs to be pointed to a save directory
+    def makeFlightPanel(self): # needs to be pointed to a save directory
         fig = plt.figure(constrained_layout = True, figsize=(11, 8.5))
         gs = fig.add_gridspec(6, 7)
         ax1 = fig.add_subplot(gs[0:3, :5])
@@ -258,107 +288,140 @@ class gliderData:
                  \n\n# dives: {len(np.unique(self.df.profile_index))//2}\
                  \n\nProblem profiles: \n{np.unique(self.problem_dives)}", 
                  verticalalignment='top', c = 'k', fontsize=16)
-
-        plt.show()
+        
+        if self.data_dir == "data/processed/":
+            plt.savefig(f"images/toSend/{self.glider}_flight_panel_full_time_series.png")
+        else:
+            plt.savefig(f"images/toSend/{self.glider}_flight_panel_{self.date}.png")
+        # plt.show()
     
-    def makeSciPlots(self):
+    def makeSciDpPanel(self):
+        fig, axs = plt.subplots(nrows=1, ncols=4, figsize=(11, 4), sharey=True)
+        axs[0].invert_yaxis()
+        axs[0].set_ylabel("Depth [m]")
+
+        profs = self.profiles_to_make.keys()
+        colors = ['k', 'c0', 'r', 'g']
+        ind_dfs = {}
+        dfs_of_same_columns = {}
+
+        for i, prof in enumerate(self.profiles_to_make.keys()):
+            axs[i].xaxis.tick_top()
+            for j, var in enumerate(self.profiles_to_make[prof]):
+                axs[i].scatter(self.df[var], self.df.depth_m, s=5, label=var)
+                axs[i].legend()
+
+        if self.data_dir == "data/processed/":
+            plt.savefig(f"images/toSend/{self.glider}_depth_profiles_full_time_series.png")
+        else:
+            plt.savefig(f"images/toSend/{self.glider}_depth_profiles_{self.date}.png")
+        # plt.show()
+
+    def makeSciTSPanel(self):
         # code adapted from Jacob Partida
-        fig = plt.figure(constrained_layout = True, figsize=(15, 8.5))
-        gs = fig.add_gridspec(6, 7)
-        ax1 = fig.add_subplot(gs[0:, 0:3])
-        ax2 = fig.add_subplot(gs[0:2, 3:])
-        # ax4 = fig.add_subplot(gs[4:, 3:])
+        for var in self.sci_vars:
+            fig = plt.figure(constrained_layout = True, figsize=(15, 8.5))
+            gs = fig.add_gridspec(6, 7)
+            ax1 = fig.add_subplot(gs[0:, 0:3])
+            ax2 = fig.add_subplot(gs[0:3, 3:])
+            # ax4 = fig.add_subplot(gs[4:, 3:])
 
-        ax2.invert_yaxis()
-        # ax3.invert_yaxis()
-        # ax4.invert_yaxis()
+            ax2.invert_yaxis()
+            # ax3.invert_yaxis()
+            # ax4.invert_yaxis()
 
-        ax1.set_xlabel("Salinity [$g \\bullet kg^{-1}$]", fontsize=14)
-        ax1.set_ylabel("Temperature [°C]", fontsize=14)
-        ax2.set_xlabel("Time", fontsize=14)
-        ax2.set_ylabel("Depth [m]", fontsize=14)
+            ax1.set_xlabel("Salinity [$g \\bullet kg^{-1}$]", fontsize=14)
+            ax1.set_ylabel("Temperature [°C]", fontsize=14)
+            ax2.set_xlabel("Time", fontsize=14)
+            ax2.set_ylabel("Depth [m]", fontsize=14)
 
-        s_lims = (np.floor(data.df.absolute_salinity.min()-0.5),
-           np.ceil(data.df.absolute_salinity.max()+0.5))
-        t_lims = (np.floor(data.df.conservative_temperature.min()-0.5),
-                np.ceil(data.df.conservative_temperature.max()+0.5))
+            s_lims = (np.floor(data.df.absolute_salinity.min()-0.5),
+            np.ceil(data.df.absolute_salinity.max()+0.5))
+            t_lims = (np.floor(data.df.conservative_temperature.min()-0.5),
+                    np.ceil(data.df.conservative_temperature.max()+0.5))
 
-        S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
-        T = np.arange(t_lims[0],t_lims[1]+0.1,0.1)
-        Tg, Sg = np.meshgrid(T,S)
-        sigma = gsw.sigma0(Sg,Tg)
+            S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
+            T = np.arange(t_lims[0],t_lims[1]+0.1,0.1)
+            Tg, Sg = np.meshgrid(T,S)
+            sigma = gsw.sigma0(Sg,Tg)
 
-        c0 = ax1.contour(Sg, Tg, sigma, colors='grey', zorder=1)
-        c0l = plt.clabel(c0, colors='k', fontsize=9)
-        p0 = ax1.scatter(self.df.absolute_salinity, self.df.conservative_temperature, c=self.df.oxygen, cmap=cmo.tempo)
-        cbar0 = fig.colorbar(p0, label="Oxygen [$mL \\bullet L^{-1}$]", location='left')
+            c0 = ax1.contour(Sg, Tg, sigma, colors='grey', zorder=1)
+            c0l = plt.clabel(c0, colors='k', fontsize=9)
 
-        ax2.scatter(self.df.time, self.df.depth_m, c=self.df.oxygen, cmap=cmo.tempo, s=2)
-        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
-        for label in ax2.get_xticklabels(which='major'):
-            label.set(rotation=15, horizontalalignment='center')
-        
-        ax3 = fig.add_subplot(gs[2:, 3:])
-        ax3.set_xlabel('\n\n\nLongitude [Deg]', fontsize=14)
-        ax3.set_ylabel('Latitude [Deg]\n\n\n', fontsize=14)
-        glider_lon, glider_lat = self.df.lon, self.df.lat
-        glider_lon_min = np.min(self.df.lon)
-        glider_lon_max = np.max(self.df.lon)
-        glider_lat_min = np.min(self.df.lat)
-        glider_lat_max = np.max(self.df.lat)
-        glider_lon_mean = np.nanmean(glider_lon)
-        glider_lat_mean = np.nanmean(glider_lat)
-        
-        lon_range = glider_lon_max-glider_lon_min
-        lat_range = glider_lat_max-glider_lat_min
+            p0 = ax1.scatter(self.df.absolute_salinity, self.df.conservative_temperature, 
+                             c=self.df[var], cmap=self.sci_colors[var], s=2)
+            cbar0 = fig.colorbar(p0, label=f"{var} [{self.units[var]}]", location='left')
 
-        if f"{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}" in os.listdir("mapPickles/"):
-            with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}", "rb") as fd:
-                map = pickle.load(fd)
-        else:
-            map = Basemap(llcrnrlon=glider_lon_min-.05, llcrnrlat=glider_lat_min-.01,
-                        urcrnrlon=glider_lon_max+.01, urcrnrlat=glider_lat_max+.05, resolution='f') # create map object
-            with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}", "wb") as fd:
-                pickle.dump(map, fd, protocol=-1)
+            ax2.scatter(self.df.time, self.df.depth_m, c=self.df[var], cmap=self.sci_colors[var], s=2)
+            ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+            for label in ax2.get_xticklabels(which='major'):
+                label.set(rotation=15, horizontalalignment='center')
+            
+            ax3 = fig.add_subplot(gs[3:, 3:])
+            ax3.set_xlabel('\n\n\nLongitude [Deg]', fontsize=14)
+            ax3.set_ylabel('Latitude [Deg]\n\n\n', fontsize=14)
+            glider_lon, glider_lat = self.df.lon, self.df.lat
+            glider_lon_min = np.min(self.df.lon)
+            glider_lon_max = np.max(self.df.lon)
+            glider_lat_min = np.min(self.df.lat)
+            glider_lat_max = np.max(self.df.lat)
+            glider_lon_mean = np.nanmean(glider_lon)
+            glider_lat_mean = np.nanmean(glider_lat)
+            
+            lon_range = glider_lon_max-glider_lon_min
+            lat_range = glider_lat_max-glider_lat_min
 
-        map.drawcoastlines()
-        map.drawcountries()
-        # map.bluemarble()
-        map.fillcontinents('#e0b479')
-        map.drawlsmask(ocean_color = "#7bcbe3", resolution='f')
-        map.drawparallels(np.linspace(glider_lat_min, glider_lat_max, 5), labels=[1,0,0,1], fmt="%0.2f")
-        map.drawmeridians(np.linspace(glider_lon_min, glider_lon_max, 5), labels=[1,0,0,1], fmt="%0.3f", rotation=20)
-        x, y = map(glider_lon, glider_lat)
-        map.scatter(x, y, c=self.df.oxygen, s=3, cmap=cmo.tempo)
+            if f"{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}" in os.listdir("mapPickles/"):
+                with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}", "rb") as fd:
+                    map = pickle.load(fd)
+            else:
+                map = Basemap(llcrnrlon=glider_lon_min-.05, llcrnrlat=glider_lat_min-.01,
+                            urcrnrlon=glider_lon_max+.01, urcrnrlat=glider_lat_max+.05, resolution='f') # create map object
+                with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}", "wb") as fd:
+                    pickle.dump(map, fd, protocol=-1)
+
+            map.drawcoastlines()
+            map.drawcountries()
+            # map.bluemarble()
+            map.fillcontinents('#e0b479')
+            map.drawlsmask(ocean_color = "#7bcbe3", resolution='f')
+            map.drawparallels(np.linspace(glider_lat_min, glider_lat_max, 5), labels=[1,0,0,1], fmt="%0.2f")
+            map.drawmeridians(np.linspace(glider_lon_min, glider_lon_max, 5), labels=[1,0,0,1], fmt="%0.3f", rotation=20)
+            x, y = map(glider_lon, glider_lat)
+            map.scatter(x, y, c=self.df[var], s=3, cmap=self.sci_colors[var])
 
 
-        axins = zoomed_inset_axes(ax3, 0.01, loc='upper left')
-        axins.set_xlim(glider_lon_min-3, glider_lon_max+3)
-        axins.set_ylim(glider_lat_min-3, glider_lat_max+3)
+            axins = zoomed_inset_axes(ax3, 0.008, loc='upper left')
+            axins.set_xlim(glider_lon_min-3, glider_lon_max+3)
+            axins.set_ylim(glider_lat_min-3, glider_lat_max+3)
 
-        if f"{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset" in os.listdir("mapPickles/"):
-            with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset", "rb") as fd:
-                map_in = pickle.load(fd)
-        else:
-            map_in = Basemap(llcrnrlon=glider_lon_min-3, llcrnrlat=glider_lat_min-3,
-                        urcrnrlon=glider_lon_max+3, urcrnrlat=glider_lat_max+3, resolution='f') # create map object
-            with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset", "wb") as fd:
-                pickle.dump(map_in, fd, protocol=-1)
+            if f"{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset" in os.listdir("mapPickles/"):
+                with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset", "rb") as fd:
+                    map_in = pickle.load(fd)
+            else:
+                map_in = Basemap(llcrnrlon=glider_lon_min-3, llcrnrlat=glider_lat_min-3,
+                            urcrnrlon=glider_lon_max+3, urcrnrlat=glider_lat_max+3, resolution='f') # create map object
+                with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset", "wb") as fd:
+                    pickle.dump(map_in, fd, protocol=-1)
 
-        map_in.drawcoastlines()
-        map_in.drawcountries()
-        map_in.fillcontinents('#e0b479')
+            map_in.drawcoastlines()
+            map_in.drawcountries()
+            map_in.fillcontinents('#e0b479')
 
-        # map.drawparallels(np.linspace(glider_lat_min-3, glider_lat_max+3, 5), labels=[1,0,0,1], fmt="%0.2f")
-        # map.drawmeridians(np.linspace(glider_lon_min-3, glider_lon_max+3, 5), labels=[1,0,0,1], fmt="%0.3f", rotation=20)
-        # map.bluemarble()
-        map_in.drawlsmask(ocean_color = "#7bcbe3", resolution='f')
-        x, y = map_in(glider_lon_mean, glider_lat_mean)
-        map_in.scatter(x, y, c='r', s=5)
-        map_in.scatter(x, y, c='r', s=100, alpha=0.25)
-        # mark_inset(ax3, axins, loc1=2, loc2=4, fc="none", ec="0.5")
+            # map.drawparallels(np.linspace(glider_lat_min-3, glider_lat_max+3, 5), labels=[1,0,0,1], fmt="%0.2f")
+            # map.drawmeridians(np.linspace(glider_lon_min-3, glider_lon_max+3, 5), labels=[1,0,0,1], fmt="%0.3f", rotation=20)
+            # map.bluemarble()
+            map_in.drawlsmask(ocean_color = "#7bcbe3", resolution='f')
+            x, y = map_in(glider_lon_mean, glider_lat_mean)
+            map_in.scatter(x, y, c='r', s=5)
+            map_in.scatter(x, y, c='r', s=100, alpha=0.25)
+            # mark_inset(ax3, axins, loc1=2, loc2=4, fc="none", ec="0.5")
 
-        plt.show()
+            if self.data_dir == "data/processed/":
+                plt.savefig(f"images/toSend/{self.glider}_{var}_ts_panel_full_time_series.png")
+            else:
+                plt.savefig(f"images/toSend/{self.glider}_{var}_ts_panel_{self.date}.png")
+            # plt.show()
     
     def makeSegmentedDf(self): # make this the data string function????
         prof_inds = self.df.profile_index.values
@@ -407,22 +470,154 @@ class gliderData:
 
                 for sub_key in sub_keys:
                     self._data[parent_key][sub_key].append(float(_vars[sub_key]))
+    
+    def moveDataFilesToProcessed(self):
+        prev_calls = os.listdir('data/processed/')
+        prev_calls.remove('.DS_Store')
 
-    def run(self):
-        self.getWorkingDirs()
-        self.readRaw()
-        self.makeDf()
+        for file in os.listdir("data/new_data"):
+            os.rename(f"data/new_data/{file}", f"data/processed/{file}")
+
+    def reset(self):
+        self.tm = 0
+        self.depth = 0
+        self.roll = 0
+        self.pitch = 0
+        self.oil_vol = 0
+        self.pressure = 0
+        self.temp = 0
+        self.cond = 0
+        self.lat = 0
+        self.lon = 0
+        self.sea_pressure = 0
+        self.vacuum = -1
+        self.amphr = 0
+        self.o2 = 0
+        self.cdom = 0
+        self.chlor = 0
+        self.backscatter = 0
+
+        self.data_strings = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
+                      "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : ("w = ### m/s", 14, 'r')}}
+
+        self._data = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
+                      "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : [list of values, e.g., roll]}}      
+        self.data_dir = "data/processed/"  
+
+    def makeFullDeploymentPlots(self):
         self.getProfiles()
         self.calcDensitySA()
         self.calcW()
         self.makeSegmentedDf()
         self.makeDataDisplayStrings()
-        self.makeFlightPlots()
-        self.makeSciPlots()
+        self.makeFlightPanel()
+        self.makeSciTSPanel()
+        self.makeSciDpPanel()
+    
+    def sendEmail(self):
+        image_dir = "images/toSend/"
+        start = datetime.strftime(np.min(self.df.time), "%Y-%b-%d %H:%M")
+        end = datetime.strftime(np.max(self.df.time), "%Y-%b-%d %H:%M")
+        email_doer = doEmail(image_dir, self.glider, self.date, self.n_yos, start, end)
+        email_doer.send()
 
+    def moveImages(self):
+        im_dirs = os.listdir("images/")
+        if "sent" not in im_dirs: os.mkdir("images/sent/")
+        ims_to_move = os.listdir('images/toSend/')
+        ims_to_move.remove('.DS_Store')
+
+        for file in ims_to_move:
+            os.rename(f"images/toSend/{file}", f"images/sent/{file}")
+    def packageTimeSeries(Self):
+        if "timeseries" not in os.listdir("images/"):
+            os.mkdir(f"images/timeseries/")
+
+        for file in os.listdir("images/toSend/"):
+            if "time" in file:
+                os.rename("images/toSend/"+ file, "images/timeseries/" + file)
+
+        with zipfile.ZipFile('images/timeseries.zip', 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zipf:
+            zipdir('images/timeseries/', zipf)
+
+        for file in os.listdir("images/timeseries/"): os.remove("images/timeseries/"+file)
+        os.removedirs("images/timeseries/")
+        os.rename("images/timeseries.zip", "images/toSend/timeseries.zip")
+
+    def run(self):
+        self.getWorkingDirs()
+        self.readRaw()
+        self.makeDf()
+        self.moveDataFilesToProcessed()
+        self.getProfiles()
+        self.calcDensitySA()
+        self.calcW()
+        self.makeSegmentedDf()
+        self.makeDataDisplayStrings()
+        self.makeFlightPanel()
+        self.makeSciTSPanel()
+        self.makeSciDpPanel()
+        self.reset()
+        self.makeFullDeploymentPlots()
+        self.packageTimeSeries()
+        self.sendEmail()
+        self.moveImages()
+
+
+class doEmail:
+    def __init__(self, image_dir, glider, date, yos, start, end):
+        self.image_dir = image_dir
+        self.glider_name = glider
+        self.date = date
+        self.yos = yos
+
+        self.subject = f"{self.glider_name} science plots on {self.date}"
+
+        self.body = f"These data were scraped from SFMC on {self.date} for the glider named \"{self.glider_name}\".\n {self.glider_name} performed {self.yos:0.0f} half-yos from {start} to {end} prior to the last scrape.\n\nThe full deployment time series can be downloaded in the attached zipfile.\n\nPlease do not reply to this email, as caleb does not know how to write code to handle that...\n\nFor data questions or concerns, please email caleb.flaim@noaa.gov and sam.woodman@noaa.gov."
+
+        self.sender_email = "esdgliders@gmail.com"
+        self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"] #nmfs.swfsc.esd-gliders@noaa.gov
+        self.password = # input("Type your password and press enter:")
+    
+    def send(self):
+        message = MIMEMultipart()
+        message["From"] = self.sender_email
+        message["To"] = ", ".join(self.recipiants)
+        message["Subject"] = self.subject
+        message["Bcc"] = "esdgliders@gmail.com"  # Recommended for mass emails
+
+        # Add body to email
+        message.attach(MIMEText(self.body, "plain"))
+        foo = os.listdir(self.image_dir)
+        foo.remove(".DS_Store")
+        for file in foo:
+            with open(self.image_dir+"/"+file, "rb") as attachment:
+                # Add file as application/octet-stream
+                # Email client can usually download this automatically as attachment
+                part = MIMEBase("application", "octet-stream")
+                part.set_payload(attachment.read())
+
+                # Encode file in ASCII characters to send by email    
+                encoders.encode_base64(part)
+
+                # Add header as key/value pair to attachment part
+                part.add_header(
+                    "Content-Disposition",
+                    f"attachment; filename= {file}",
+                )
+
+            # Add attachment to message and convert message to string
+            message.attach(part)
+            text = message.as_string()
+
+        # Log in to server using secure context and send email
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+            server.login(self.sender_email, self.password)
+            server.sendmail(self.sender_email, self.recipiants, text)
+
+    
 
 if __name__ == "__main__":
     data = gliderData()
     data.run()
-# data = gliderData()
-# data.run()
