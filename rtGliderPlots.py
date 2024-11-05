@@ -17,6 +17,9 @@ from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes
 from mpl_toolkits.axes_grid1.inset_locator import mark_inset
 from datetime import datetime
 import zipfile
+from google.cloud import secretmanager
+import google_crc32c
+import pyglider.utils as pgu
 
 # Email modules
 import email, smtplib, ssl
@@ -25,6 +28,7 @@ from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+# Function to zip everything in a folder
 def zipdir(path, ziph):
     # ziph is zipfile handle
     for root, dirs, files in os.walk(path):
@@ -33,14 +37,56 @@ def zipdir(path, ziph):
                        os.path.relpath(os.path.join(root, file), 
                                        os.path.join(path, '..')))
 
+def returnNan(t, v):
+    return lambda _t: np.NaN
+# Function to access GCP secrets
+# Taken from esdglider b/c pip installing didn't work...       
+def access_secret_version(project_id, secret_id, version_id = 'latest'):
+    """
+    Access the payload for the given secret version if one exists. The version
+    can be a version number as a string (e.g. "5") or an alias (e.g. "latest").
+    
+    https://github.com/googleapis/python-secret-manager/blob/main/samples/snippets/access_secret_version.py
+    """
+
+    # Create the Secret Manager client.
+    client = secretmanager.SecretManagerServiceClient()
+
+    # Build the resource name of the secret version.
+    name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+
+    # Access the secret version.
+    response = client.access_secret_version(request={"name": name})
+
+    # Verify payload checksum.
+    crc32c = google_crc32c.Checksum()
+    crc32c.update(response.payload.data)
+    # if response.payload.data_crc32c != int(crc32c.hexdigest(), 16):
+    #     _log.error("Data corruption detected.")
+    #     return response
+
+    # Print the secret payload.
+    #
+    # WARNING: Do not print the secret in a production environment - this
+    # snippet is showing how to access the secret material.
+    # payload = response.payload.data.decode("UTF-8")
+    # print("Plaintext: {}".format(payload))
+
+    return response.payload.data.decode("UTF-8")
+
 class gliderData:
     def __init__(self):
         self.data_dir = ""
         self.cache_dir = ""
         self.glider = ""
         self.date = ""
-        self.max_amphrs = 300
+        self.max_amphrs = 800
         self.n_yos = -1
+        self.n_yos_tot = -1
+        self.dive_start = -1
+        self.dive_end = -1
+        self.dep_start = -1
+        self.dep_end = -1
 
         self.tm = 0
         self.depth = 0
@@ -61,48 +107,58 @@ class gliderData:
         self.backscatter = 0
         self.this_call = "call_0"
 
-        self.problem_dives = []
+  
+        self.problem_dives = [] # empty list to store number values of problematic dives
+        
         self.profiles_to_make = {"profile0":["cdom"],
                                  "profile1":["absolute_salinity", "temp", "sigma"],
                                  "profile2":["oxygen"],
-                                 "profile3":["chlorophyl"]}
-        self.sci_vars = ["cdom", "chlorophyl", "oxygen", "backscatter"]
-        self.sci_colors = {"cdom":cmo.solar, "chlorophyl": cmo.algae, "oxygen":cmo.tempo, "backscatter":cmo.haline}
+                                 "profile3":["chlorophyl"]} # Dictionary to be looped thru to make depth profiles of scienec vars
+      
+        self.sci_vars = ["cdom", "chlorophyl", "oxygen", "backscatter"] # List of science variables
+        self.sci_colors = {"cdom":cmo.solar, "chlorophyl": cmo.algae, "oxygen":cmo.tempo, "backscatter":cmo.haline} # dictionary of colormaps to be used for listed science variables
 
+        # Dictionary used to store strings of processed data stats and 
+        # parameters to display the string (e.g., color, fontsize)
         self.data_strings = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
                       "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : ("w = ### m/s", 14, 'r')}}
-
+        
+        # Empty dictionary to store data for dives/climbs
         self._data = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
                       "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : [list of values, e.g., roll]}}
-        self.units = {"w":'m/s', "pitch":'deg', "roll":'deg', "dt":'hrs', "amphr":'Ahr', "vac":'inHg', "cdom":"nanometers", "chlorophyl":"µmol•$m^{-2}$", "oxygen":"mL•$L^{-1}$", "backscatter":"$m^{-1}$"}
+        # Dictionary of units for plotting purposes
+        self.units = {"w":'m/s', "pitch":'deg', "roll":'deg', "dt":'hrs', "amphr":'Ahr', "vac":'inHg', "cdom":"nanometers", "chlorophyl":"µmol•$m^{-2}$", "oxygen":"mL•$L^{-1}$", "backscatter":"$m^{-1}$"} # 
+        # Dictionary to store acceptable ranges fpr flight parameters
         self.acceptable_ranges = {"dive":{"w":[-0.08, -0.20], "pitch":[-20, -29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]},
                                   "climb":{"w":[0.08, 0.20], "pitch":[20, 29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]}}
       
     def getWorkingDirs(self):
-        # data_dir = input("Enter the absolute file path to the binary files for your deployment (e.g., /Users/NAME/Documents/etc.): ")
-        self.data_dir = "data/new_data/"
-        # cache_dir = (input("If your cahce files are in a separate directy than the data files, enter the absolute path to them. Other wise press enter.") or "0")
-        self.cache_dir = "cache/"
+        self.data_dir = "data/new_data/" # set directoy path for data
+        self.cache_dir = "/Users/cflaim/Documents/GitHub/standard-glider-files/Cache/" # set directoy path for cache
 
+        # Grabs the glider's name from the data files
         glider = os.listdir(self.data_dir)
         for g in glider:
             if ".tbd" in g:
                 self.glider = g.split("-")[0]
                 break
 
-    def readRaw(self): # needs to be pointed to working directory
-        if self.cache_dir == "0":
-            dbd = dbdreader.MultiDBD(pattern=self.data_dir+'*.[st]bd')
-        else:
-            dbd = dbdreader.MultiDBD(pattern=self.data_dir+'*.[st]bd', cacheDir=self.cache_dir)
+    def readRaw(self):
+        # interp_fact_keys = ["m_depth", 'sci_flbbcd_bb_units','sci_flbbcd_chlor_units', 'sci_flbbcd_cdom_units','sci_oxy4_oxygen','m_coulomb_amphr_total', 'm_vacuum','m_roll', 'm_pitch', 'm_de_oil_vol', 'sci_water_pressure', 'sci_water_temp', 'sci_water_cond', 'm_lat', 'm_lon']
+        # interp_fact = {}
+        # for key in interp_fact_keys:
+        #     interp_fact[key] = returnNan
 
-        self.tm, self.depth, self.backscatter, self.chlor, self.cdom, self.o2, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.pressure, self.temp, self.cond, self.lat, self.lon = dbd.get_sync("m_depth", 'sci_flbbcd_bb_units','sci_flbbcd_chlor_units', 'sci_flbbcd_cdom_units','sci_oxy4_oxygen','m_coulomb_amphr','m_vacuum','m_roll', 'm_pitch', 'm_de_oil_vol', 
-                                'sci_water_pressure', 'sci_water_temp', 'sci_water_cond', 'm_lat', 'm_lon')
+        # Creates dbd reader object
+        dbd = dbdreader.MultiDBD(pattern=self.data_dir+'*.[st]bd', cacheDir=self.cache_dir, complemented_files_only=True)
+
+        # Set class variables to data arrays from dbdreader. 
+        # NOTE: order of these is arbitrary, but depth must be second!
+        self.tm, self.depth, self.backscatter, self.chlor, self.cdom, self.o2, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.pressure, self.temp, self.cond, self.lat, self.lon = dbd.get_sync("m_depth", 'sci_flbbcd_bb_units','sci_flbbcd_chlor_units', 'sci_flbbcd_cdom_units','sci_oxy4_oxygen','m_coulomb_amphr_total', 'm_vacuum','m_roll', 'm_pitch', 'm_de_oil_vol', 'sci_water_pressure', 'sci_water_temp', 'sci_water_cond', 'm_lat', 'm_lon', interpolating_function_factory=None)
         
         self.roll, self.pitch = self.roll*180/np.pi, self.pitch*180/np.pi # convert roll and pitch from rad to deg
         self.sea_pressure = self.pressure * 10 - 10.1325 # convert pressure to sea pressure in dbar for GSW
         self.cond = self.cond * 10 # convert cond from s/m to mS/cm for GSW
-        
 
         # Uncomment to print out available sci and eng variables
         # print("we the following science parameters:")
@@ -112,30 +168,33 @@ class gliderData:
         # for i,p in enumerate(dbd.parameterNames['eng']):
         #     print("%2d: %s"%(i,p))
 
-    def makeDf(self): # look at Sam's code for example
+        dbd.close()
+
+    def makeDf(self): 
+        # creates temporary time list after converting time from ns to datetime strings
         _dt = np.array([dbdreader.dbdreader.epochToDateTimeStr(t, timeformat='%H:%M:%S') for t in self.tm])
-        time = np.array([t[0]+ ' ' +t[1] for t in _dt])
+        time = np.array([t[0]+ ' ' +t[1] for t in _dt]) # combines separate data and time strings into a singular string
 
         vars = [time, self.depth, self.backscatter, self.chlor, self.cdom, self.o2, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.sea_pressure, self.pressure, self.temp, 
-                self.cond, self.lat, self.lon] # variable values for pandas DF
+                self.cond, self.lat, self.lon] # List of variable values for pandas DF
         columns = ['time', 'depth_m', 'backscatter', 'chlorophyl', 'cdom', 'oxygen', 'amphr', 'vacuum', 'roll_deg', 'pitch_deg', 'oil_vol','sea_pressure', 'pressure', 
-                'temp', 'cond', 'lat', 'lon'] # column names for pandas df
+                'temp', 'cond', 'lat', 'lon'] # List of column names for pandas df
         
         df_dict = {} # empty dict to be filled 
         # fill above dictionary
         for i, var in enumerate(columns):
             df_dict[var] = vars[i]
 
-
         self.df = pd.DataFrame(df_dict) # make pandas df from dict
         self.df['time'] = pd.to_datetime(self.df['time']) # convert the time column to DateTime type from datestrings
         self.date = np.max(self.df.time)
-        self.date = datetime.strftime(self.date, "%Y-%b-%d")
+        self.date = datetime.strftime(self.date, "%Y-%b-%d") # convert time strings to datetime
+        # NOTE: should do somehting here to check for gaps in the data to avoid 
+        self.df = self.df.query("cond > 0")
+        self.df.reindex()
 
     def getProfiles(self):
-        """
-        Adds profile index and direction to existing Pandas DataFrame made from slocum binary data files.
-        """
+        # Code taken and modified from pyglider to work with pandas
         min_dp=10.0
         inversion=3.
         filt_length=7
@@ -146,34 +205,47 @@ class gliderData:
         pronum = 1
         lastpronum = 0
 
-        good = np.where(~np.isnan(self.df.pressure))[0]
+        good = np.where(~np.isnan(self.df.pressure.values))[0]
         p = np.convolve(self.df.pressure.values[good],
                         np.ones(filt_length) / filt_length, 'same')
         dpall = np.diff(p)
         inflect = np.where(dpall[:-1] * dpall[1:] < 0)[0]
         for n, i in enumerate(inflect[:-1]):
-            nprofile = inflect[n+1] - inflect[n]
-            inds = np.arange(good[inflect[n]], good[inflect[n+1]]+1) + 1
-            dp = np.diff(self.df.pressure[inds[[-1, 0]]])
-            if ((nprofile >= min_nsamples) and (np.abs(dp) > 10)):
-                direction[inds] = np.sign(dp)
-                profile[inds] = pronum
-                lastpronum = pronum
-                pronum += 1
-            else:
-                profile[good[inflect[n]]:good[inflect[n+1]]] = lastpronum + 0.5
+            try:
+                nprofile = inflect[n+1] - inflect[n]
+                inds = np.arange(good[inflect[n]], good[inflect[n+1]]+1) + 1
+                dp = np.diff(self.df.pressure[inds[[-1, 0]]])
+
+                if ((nprofile >= min_nsamples) and (np.abs(dp) > 10)):
+                    direction[inds] = np.sign(dp)
+                    profile[inds] = pronum
+                    lastpronum = pronum
+                    pronum += 1
+                else:
+                    profile[good[inflect[n]]:good[inflect[n+1]]] = lastpronum + 0.5
+
+            except KeyError:
+                continue
 
         self.df['profile_index'] = profile
         self.df['profile_direction'] = direction
-        self.n_yos = np.max(self.df.profile_index)
+
+        if "new" in self.data_dir:
+            self.n_yos = np.max(self.df.profile_index) - np.min(self.df.profile_index)
+            self.dive_start = datetime.strftime(np.min(self.df.time), "%Y-%b-%d %H:%M")
+            self.dive_end = datetime.strftime(np.max(self.df.time), "%Y-%b-%d %H:%M")
+        else:
+            self.n_yos_tot = np.max(self.df.profile_index)
+            self.dep_start = datetime.strftime(np.min(self.df.time), "%Y-%b-%d %H:%M")
+            self.dep_end = datetime.strftime(np.max(self.df.time), "%Y-%b-%d %H:%M")
 
     def calcDensitySA(self):
         # calculate water density
-        sp = gsw.conversions.SP_from_C(self.cond, self.temp, self.sea_pressure) # calculate practical sal from conductivity
-        sa = gsw.conversions.SA_from_SP(sp, self.sea_pressure, lon=np.nanmean(self.lon), lat=np.nanmean(self.lat)) # calculate absolute salinity from practical sal and lat/lon
-        pt = gsw.conversions.pt0_from_t(sa, self.temp, self.sea_pressure) # calculate potential temperature from salinity and temp
+        sp = gsw.conversions.SP_from_C(self.df.cond, self.df.temp, self.df.sea_pressure) # calculate practical sal from conductivity
+        sa = gsw.conversions.SA_from_SP(sp, self.df.sea_pressure, lon=np.nanmean(self.df.lon), lat=np.nanmean(self.df.lat)) # calculate absolute salinity from practical sal and lat/lon
+        pt = gsw.conversions.pt0_from_t(sa, self.df.temp, self.df.sea_pressure) # calculate potential temperature from salinity and temp
         ct = gsw.conversions.CT_from_pt(sa, pt) # calculate critical temperature from potential temperature
-        rho = gsw.density.rho(sa, ct, self.sea_pressure) # calculate density from absolute sal, critical temp, and pressure
+        rho = gsw.density.rho(sa, ct, self.df.sea_pressure) # calculate density from absolute sal, critical temp, and pressure
         sigma = gsw.sigma0(sa, ct)
 
         self.df['density'] = rho
@@ -181,6 +253,8 @@ class gliderData:
         self.df['potential_temperature'] = pt
         self.df['sigma'] = sigma
         self.df['conservative_temperature'] = ct
+
+        self.df = self.df.query('absolute_salinity > 0')
 
     def calcW(self):
         prof_inds = self.df.profile_index.values
@@ -283,7 +357,7 @@ class gliderData:
                          fontstyle=self.data_strings[key][sub_key][3], fontweight=self.data_strings[key][sub_key][4])
 
         # ax4.text(0.03, 0.98, "Avg dive", verticalalignment='top', c = 'k')
-        ax5.text(0.03, 0.95, f"Bat %: {100-np.max(self.df.amphr)/self.max_amphrs:0.2f}\
+        ax5.text(0.03, 0.95, f"Bat %: {(1-(np.max(self.df.amphr)/self.max_amphrs))*100:0.2f}\
                  \n\nAmphr: {np.max(self.df.amphr):0.2f}\
                  \n\n# dives: {len(np.unique(self.df.profile_index))//2}\
                  \n\nProblem profiles: \n{np.unique(self.problem_dives)}", 
@@ -332,14 +406,12 @@ class gliderData:
 
             ax1.set_xlabel("Salinity [$g \\bullet kg^{-1}$]", fontsize=14)
             ax1.set_ylabel("Temperature [°C]", fontsize=14)
-            ax2.set_xlabel("Time", fontsize=14)
-            ax2.set_ylabel("Depth [m]", fontsize=14)
+
 
             s_lims = (np.floor(data.df.absolute_salinity.min()-0.5),
             np.ceil(data.df.absolute_salinity.max()+0.5))
             t_lims = (np.floor(data.df.conservative_temperature.min()-0.5),
                     np.ceil(data.df.conservative_temperature.max()+0.5))
-
             S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
             T = np.arange(t_lims[0],t_lims[1]+0.1,0.1)
             Tg, Sg = np.meshgrid(T,S)
@@ -349,13 +421,20 @@ class gliderData:
             c0l = plt.clabel(c0, colors='k', fontsize=9)
 
             p0 = ax1.scatter(self.df.absolute_salinity, self.df.conservative_temperature, 
-                             c=self.df[var], cmap=self.sci_colors[var], s=2)
+                             c=self.df[var], cmap=self.sci_colors[var], s=5)
             cbar0 = fig.colorbar(p0, label=f"{var} [{self.units[var]}]", location='left')
 
-            ax2.scatter(self.df.time, self.df.depth_m, c=self.df[var], cmap=self.sci_colors[var], s=2)
-            ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
-            for label in ax2.get_xticklabels(which='major'):
-                label.set(rotation=15, horizontalalignment='center')
+            if "cat" in self.data_dir:
+                ax2.scatter(self.df[var], self.df.depth_m, s=2)
+                ax2.set_xlabel(f"{self.df[var]} [{self.units[var]}]", fontsize=14)
+                ax2.set_ylabel("Depth [m]", fontsize=14)
+            else:
+                ax2.set_xlabel("Time", fontsize=14)
+                ax2.set_ylabel("Depth [m]", fontsize=14)
+                ax2.scatter(self.df.time, self.df.depth_m, c=self.df[var], cmap=self.sci_colors[var], s=2)
+                ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+                for label in ax2.get_xticklabels(which='major'):
+                    label.set(rotation=15, horizontalalignment='center')
             
             ax3 = fig.add_subplot(gs[3:, 3:])
             ax3.set_xlabel('\n\n\nLongitude [Deg]', fontsize=14)
@@ -385,10 +464,11 @@ class gliderData:
             # map.bluemarble()
             map.fillcontinents('#e0b479')
             map.drawlsmask(ocean_color = "#7bcbe3", resolution='f')
-            map.drawparallels(np.linspace(glider_lat_min, glider_lat_max, 5), labels=[1,0,0,1], fmt="%0.2f")
-            map.drawmeridians(np.linspace(glider_lon_min, glider_lon_max, 5), labels=[1,0,0,1], fmt="%0.3f", rotation=20)
+            map.drawparallels(np.linspace(glider_lat_min-0.1, glider_lat_max+0.1, 5), labels=[1,0,0,1], fmt="%0.2f")
+            map.drawmeridians(np.linspace(glider_lon_min-0.1, glider_lon_max+0.1, 5), labels=[1,0,0,1], fmt="%0.3f", rotation=20)
             x, y = map(glider_lon, glider_lat)
-            map.scatter(x, y, c=self.df[var], s=3, cmap=self.sci_colors[var])
+            map.scatter(x, y, c=self.df[var], s=5, cmap=self.sci_colors[var])
+            map.scatter(x.iloc[-1], y.iloc[-1], c='red', s=50, marker="*")
 
 
             axins = zoomed_inset_axes(ax3, 0.008, loc='upper left')
@@ -416,14 +496,19 @@ class gliderData:
             map_in.scatter(x, y, c='r', s=5)
             map_in.scatter(x, y, c='r', s=100, alpha=0.25)
             # mark_inset(ax3, axins, loc1=2, loc2=4, fc="none", ec="0.5")
-
+            
             if self.data_dir == "data/processed/":
                 plt.savefig(f"images/toSend/{self.glider}_{var}_ts_panel_full_time_series.png")
             else:
                 plt.savefig(f"images/toSend/{self.glider}_{var}_ts_panel_{self.date}.png")
-            # plt.show()
+
+        # fig = plt.figure()
+        # ax = fig.add_subplot(projection='3d')   
+        # ax.scatter(self.df.lon, self.df.lat, self.df.depth_m, c=self.df.cdom)
+        # ax.invert_zaxis()
+        # plt.show()
     
-    def makeSegmentedDf(self): # make this the data string function????
+    def makeSegmentedDf(self):
         prof_inds = self.df.profile_index.values
         depth = self.df.depth_m.values
         t = np.float64(self.df.time.values)
@@ -434,6 +519,7 @@ class gliderData:
         vac = self.df.vacuum.values
 
         sub_keys = ["w", "pitch", "roll", "dt", "amphr", "vac"]
+        dive_bool = np.zeros(len(self.df.time))
 
         for val in np.unique(prof_inds)[0:len(np.unique(prof_inds))-1]: # fill above 'dive_segs' dict with values
             if val != np.float64('nan'): 
@@ -465,11 +551,19 @@ class gliderData:
 
                 if w > 0:
                     parent_key = "climb"
+                    for i in range(start, end):
+                        dive_bool[i] = -1
                 else:
                     parent_key = "dive"
+                    for i in range(start, end):
+                        dive_bool[i] = 1
 
                 for sub_key in sub_keys:
                     self._data[parent_key][sub_key].append(float(_vars[sub_key]))
+
+        self.df["dive_bool"] = dive_bool
+        self.df = self.df.query("dive_bool > 0")
+        # self.df = self.df.query("cond > 0")
     
     def moveDataFilesToProcessed(self):
         prev_calls = os.listdir('data/processed/')
@@ -505,6 +599,8 @@ class gliderData:
         self.data_dir = "data/processed/"  
 
     def makeFullDeploymentPlots(self):
+        self.readRaw()
+        self.makeDf()
         self.getProfiles()
         self.calcDensitySA()
         self.calcW()
@@ -516,9 +612,8 @@ class gliderData:
     
     def sendEmail(self):
         image_dir = "images/toSend/"
-        start = datetime.strftime(np.min(self.df.time), "%Y-%b-%d %H:%M")
-        end = datetime.strftime(np.max(self.df.time), "%Y-%b-%d %H:%M")
-        email_doer = doEmail(image_dir, self.glider, self.date, self.n_yos, start, end)
+        email_doer = doEmail(image_dir, self.glider, self.date, self.n_yos, self.n_yos_tot, 
+                             self.dive_start, self.dive_end, self.dep_start, self.dep_end)
         email_doer.send()
 
     def moveImages(self):
@@ -529,6 +624,7 @@ class gliderData:
 
         for file in ims_to_move:
             os.rename(f"images/toSend/{file}", f"images/sent/{file}")
+    
     def packageTimeSeries(Self):
         if "timeseries" not in os.listdir("images/"):
             os.mkdir(f"images/timeseries/")
@@ -565,19 +661,26 @@ class gliderData:
 
 
 class doEmail:
-    def __init__(self, image_dir, glider, date, yos, start, end):
+    def __init__(self, image_dir, glider, date, yos, yos_tot, dive_start, dive_end, dep_start, dep_end):
         self.image_dir = image_dir
         self.glider_name = glider
         self.date = date
         self.yos = yos
+        self.yos_total = yos_tot
 
         self.subject = f"{self.glider_name} science plots on {self.date}"
 
-        self.body = f"These data were scraped from SFMC on {self.date} for the glider named \"{self.glider_name}\".\n {self.glider_name} performed {self.yos:0.0f} half-yos from {start} to {end} prior to the last scrape.\n\nThe full deployment time series can be downloaded in the attached zipfile.\n\nPlease do not reply to this email, as caleb does not know how to write code to handle that...\n\nFor data questions or concerns, please email caleb.flaim@noaa.gov and sam.woodman@noaa.gov."
+        self.body = f"This is an automated email and is a prototype for the automated webscrapping application.\nThese data were scraped from SFMC on {self.date} for the glider named \"{self.glider_name}\".\
+            \n\n{self.glider_name} performed {self.yos+1:0.0f} half-yos from {dive_start} to {dive_end} prior to the last scrape.\
+            \n{self.glider_name} has performed a total of {self.yos_total+1:0.0f} from {dep_start} to {dep_end}.\
+            \n\nThe full deployment time series can be downloaded in the attached zipfile.\n\nPlease do not reply to this email, as caleb does not know how to write code to handle that...\
+            \n\nFor data questions or concerns, please email caleb.flaim@noaa.gov and sam.woodman@noaa.gov."
 
         self.sender_email = "esdgliders@gmail.com"
-        self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"] #nmfs.swfsc.esd-gliders@noaa.gov
-        self.password = # input("Type your password and press enter:")
+        self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"] #nmfs.swfsc.esd-gliders@noaa.gov , "jacob.partida@noaa.gov", 
+                        #    "jen.walsh@noaa.gov", "anthony.cossio@noaa.gov", "christian.reiss@noaa.gov",
+                        #    "eric.bjorkstedt@noaa.gov"
+        self.password =  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
     
     def send(self):
         message = MIMEMultipart()
