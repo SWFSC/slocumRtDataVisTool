@@ -20,6 +20,7 @@ import zipfile
 from google.cloud import secretmanager
 import google_crc32c
 import pyglider.utils as pgu
+import esdglider.gcp as gcp
 
 # Email modules
 import email, smtplib, ssl
@@ -40,41 +41,8 @@ def zipdir(path, ziph):
 def returnNan(t, v):
     return lambda _t: np.NaN
 
-# Function to access GCP secrets
-# Taken from esdglider b/c pip installing didn't work...       
-def access_secret_version(project_id, secret_id, version_id = 'latest'):
-    """
-    Access the payload for the given secret version if one exists. The version
-    can be a version number as a string (e.g. "5") or an alias (e.g. "latest").
-    
-    https://github.com/googleapis/python-secret-manager/blob/main/samples/snippets/access_secret_version.py
-    """
-
-    # Create the Secret Manager client.
-    client = secretmanager.SecretManagerServiceClient()
-
-    # Build the resource name of the secret version.
-    name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
-
-    # Access the secret version.
-    response = client.access_secret_version(request={"name": name})
-
-    # Verify payload checksum.
-    crc32c = google_crc32c.Checksum()
-    crc32c.update(response.payload.data)
-    # if response.payload.data_crc32c != int(crc32c.hexdigest(), 16):
-    #     _log.error("Data corruption detected.")
-    #     return response
-
-    # Print the secret payload.
-    #
-    # WARNING: Do not print the secret in a production environment - this
-    # snippet is showing how to access the secret material.
-    # payload = response.payload.data.decode("UTF-8")
-    # print("Plaintext: {}".format(payload))
-
-    return response.payload.data.decode("UTF-8")
-
+#need to mount buckets
+#need to access gcp secret for email pw
 class gliderData:
     def __init__(self):
         self.data_dir = ""
@@ -190,8 +158,11 @@ class gliderData:
         self.df['time'] = pd.to_datetime(self.df['time']) # convert the time column to DateTime type from datestrings
         self.date = np.max(self.df.time)
         self.date = datetime.strftime(self.date, "%Y-%b-%d") # convert time strings to datetime
+
         # NOTE: should do somehting here to check for gaps in the data to avoid 
         self.df = self.df.query("cond > 0")
+        self.df = self.df.query("temp > -1")
+        self.df = self.df.query("sea_pressure > -1")
         self.df.reindex()
 
     def getProfiles(self):
@@ -659,7 +630,6 @@ class gliderData:
             for file in  os.listdir("data/toSend/csv/"+dir):
                 os.remove("data/toSend/csv/"+dir+"/"+file)
         
-
     def run(self):
         self.getWorkingDirs()
         self.readRaw()
@@ -703,7 +673,7 @@ class doEmail:
         self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"] #nmfs.swfsc.esd-gliders@noaa.gov , "jacob.partida@noaa.gov", 
                         #    "jen.walsh@noaa.gov", "anthony.cossio@noaa.gov", "christian.reiss@noaa.gov",
                         #    "eric.bjorkstedt@noaa.gov"
-        self.password =  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
+        self.password =  "dyzw kqlu daop oemy" # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
     
     def send(self):
         message = MIMEMultipart()
