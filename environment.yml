@@ -1,4 +1,4 @@
-name: testEnv2
+name: rtDataVis
 channels:
   - conda-forge
   - defaults
