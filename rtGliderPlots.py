@@ -39,6 +39,7 @@ def zipdir(path, ziph):
 
 def returnNan(t, v):
     return lambda _t: np.NaN
+
 # Function to access GCP secrets
 # Taken from esdglider b/c pip installing didn't work...       
 def access_secret_version(project_id, secret_id, version_id = 'latest'):
@@ -609,10 +610,12 @@ class gliderData:
         self.makeFlightPanel()
         self.makeSciTSPanel()
         self.makeSciDpPanel()
+        self.saveDataCsv()
     
     def sendEmail(self):
         image_dir = "images/toSend/"
-        email_doer = doEmail(image_dir, self.glider, self.date, self.n_yos, self.n_yos_tot, 
+        csv_dir = "data/toSend/csv.zip"
+        email_doer = doEmail(image_dir, csv_dir, self.glider, self.date, self.n_yos, self.n_yos_tot, 
                              self.dive_start, self.dive_end, self.dep_start, self.dep_end)
         email_doer.send()
 
@@ -640,6 +643,23 @@ class gliderData:
         os.removedirs("images/timeseries/")
         os.rename("images/timeseries.zip", "images/toSend/timeseries.zip")
 
+    def saveDataCsv(self):
+        if "new" in self.data_dir:
+            self.df.to_csv(f"data/toSend/csv/mostRecentScrape/{self.glider}_{self.date}_recent_scrape_data.csv")
+        else:
+            self.df.to_csv(f"data/toSend/csv/timeseries/{self.glider}_{self.date}_timeseries.csv")
+
+    def zipAndDelCsv(self):
+        with zipfile.ZipFile('data/toSend/csv.zip', 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zipf:
+            zipdir('data/toSend/csv/', zipf)
+
+        dirs = os.listdir("data/toSend/csv/")
+        dirs.remove('.DS_Store')
+        for dir in dirs: 
+            for file in  os.listdir("data/toSend/csv/"+dir):
+                os.remove("data/toSend/csv/"+dir+"/"+file)
+        
+
     def run(self):
         self.getWorkingDirs()
         self.readRaw()
@@ -653,16 +673,19 @@ class gliderData:
         self.makeFlightPanel()
         self.makeSciTSPanel()
         self.makeSciDpPanel()
+        self.saveDataCsv()
         self.reset()
         self.makeFullDeploymentPlots()
         self.packageTimeSeries()
+        self.zipAndDelCsv()
         self.sendEmail()
         self.moveImages()
 
 
 class doEmail:
-    def __init__(self, image_dir, glider, date, yos, yos_tot, dive_start, dive_end, dep_start, dep_end):
+    def __init__(self, image_dir, csv_dir, glider, date, yos, yos_tot, dive_start, dive_end, dep_start, dep_end):
         self.image_dir = image_dir
+        self.csv_dir = csv_dir
         self.glider_name = glider
         self.date = date
         self.yos = yos
@@ -712,6 +735,25 @@ class doEmail:
             # Add attachment to message and convert message to string
             message.attach(part)
             text = message.as_string()
+
+        with open(self.csv_dir, "rb") as attachment:
+            # Add file as application/octet-stream
+            # Email client can usually download this automatically as attachment
+            part = MIMEBase("application", "octet-stream")
+            part.set_payload(attachment.read())
+
+            # Encode file in ASCII characters to send by email    
+            encoders.encode_base64(part)
+
+            # Add header as key/value pair to attachment part
+            part.add_header(
+                "Content-Disposition",
+                "attachment; filename= csv.zip",
+            )
+
+        # Add attachment to message and convert message to string
+        message.attach(part)
+        text = message.as_string()
 
         # Log in to server using secure context and send email
         context = ssl.create_default_context()
