@@ -629,7 +629,7 @@ class gliderData:
         for dir in dirs: 
             for file in  os.listdir("data/toSend/csv/"+dir):
                 os.remove("data/toSend/csv/"+dir+"/"+file)
-        
+    
     def run(self):
         self.getWorkingDirs()
         self.readRaw()
@@ -736,3 +736,4 @@ class doEmail:
 if __name__ == "__main__":
     data = gliderData()
     data.run()
+
