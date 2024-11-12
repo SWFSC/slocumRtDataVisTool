@@ -5,6 +5,8 @@ import xarray as xr
 import dbdreader
 import matplotlib.pyplot as plt
 import os
+import sys
+import argparse
 import scipy as sp
 from scipy import odr
 from sklearn.linear_model import LinearRegression
@@ -43,6 +45,7 @@ def returnNan(t, v):
 
 #need to mount buckets
 #need to access gcp secret for email pw
+
 class gliderData:
     def __init__(self):
         self.data_dir = ""
@@ -102,8 +105,8 @@ class gliderData:
                                   "climb":{"w":[0.08, 0.20], "pitch":[20, 29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]}}
       
     def getWorkingDirs(self):
-        self.data_dir = "data/new_data/" # set directoy path for data
-        self.cache_dir = "/Users/cflaim/Documents/GitHub/standard-glider-files/Cache/" # set directoy path for cache
+        self.data_dir = "data/" # set directoy path for data
+        self.cache_dir = "/opt/standard-glider-files/Cache/" # set directoy path for cache
 
         # Grabs the glider's name from the data files
         glider = os.listdir(self.data_dir)
@@ -568,7 +571,7 @@ class gliderData:
 
         self._data = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
                       "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : [list of values, e.g., roll]}}      
-        self.data_dir = "data/processed/"  
+        self.data_dir = f"data/{self.glider}/processed/"  
 
     def makeFullDeploymentPlots(self):
         self.readRaw()
@@ -629,7 +632,17 @@ class gliderData:
         for dir in dirs: 
             for file in  os.listdir("data/toSend/csv/"+dir):
                 os.remove("data/toSend/csv/"+dir+"/"+file)
-    
+
+    def checkNewData(self):
+        pass
+
+    def checkGliderDataDir(self):
+        if self.glider not in os.lisdir(self.data_dir):
+            os.mkdir(f"{self.glider}")
+            os.mkdir(f"{self.glider}/new_data/")
+            os.mkdir(f"{self.glider}/processed/")
+        self.data_dir = f"data/{self.glider}/new_data"
+
     def run(self):
         self.getWorkingDirs()
         self.readRaw()
@@ -673,7 +686,7 @@ class doEmail:
         self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"] #nmfs.swfsc.esd-gliders@noaa.gov , "jacob.partida@noaa.gov", 
                         #    "jen.walsh@noaa.gov", "anthony.cossio@noaa.gov", "christian.reiss@noaa.gov",
                         #    "eric.bjorkstedt@noaa.gov"
-        self.password =   # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
+        self.password =  "dyzw kqlu daop oemy" # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
     
     def send(self):
         message = MIMEMultipart()
@@ -734,6 +747,7 @@ class doEmail:
     
 
 if __name__ == "__main__":
+    gcp.gcs_mount_bucket("amlr-gliders-deployments-dev", "/mnt/deployments/")
     data = gliderData()
     data.run()
 
