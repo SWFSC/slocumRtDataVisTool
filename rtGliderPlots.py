@@ -21,7 +21,7 @@ from datetime import datetime
 import zipfile
 from google.cloud import secretmanager
 import google_crc32c
-import pyglider.utils as pgu
+# import pyglider.utils as pgu
 import esdglider.gcp as gcp
 
 # Email modules
