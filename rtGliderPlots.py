@@ -6,6 +6,7 @@ import dbdreader
 import matplotlib.pyplot as plt
 import os
 import sys
+import shutil
 import argparse
 import scipy as sp
 from scipy import odr
@@ -43,16 +44,28 @@ def zipdir(path, ziph):
 def returnNan(t, v):
     return lambda _t: np.NaN
 
-#need to mount buckets
 #need to access gcp secret for email pw
 
 class gliderData:
-    def __init__(self):
-        self.data_dir = ""
-        self.cache_dir = ""
-        self.glider = ""
-        self.date = ""
+    def __init__(self, args):
+        # Glider info
+        self.deployment = args.deployment
+        self.glider = self.deployment.split("-")[0]
+        self.project = args.project
         self.max_amphrs = 800
+
+        # Data path info
+        gcp_bucket_dep_date = self.deployment.split("-")[1][0:4]
+        gcp_bucket_dep_date.strip()
+        self.processed_dir = f"data/{self.glider}/processed/"
+        self.data_dir = f"data/{self.glider}/new_data/" # set data dir specific to glider
+        self.data_parent_dir = "data/" # set parent dir for data folders (any glider)
+        self.cache_dir = "/opt/standard-glider-files/Cache/" # set directoy path for cache
+        self.gcp_mnt_bucket_dir = f"/mnt/deployments/{self.project}/{gcp_bucket_dep_date}/{self.deployment}/data/binary/rt/"
+
+        self.date = ""
+        
+        # Eng data defaults
         self.n_yos = -1
         self.n_yos_tot = -1
         self.dive_start = -1
@@ -60,6 +73,7 @@ class gliderData:
         self.dep_start = -1
         self.dep_end = -1
 
+        # Sci data defaults
         self.tm = 0
         self.depth = 0
         self.roll = 0
@@ -103,17 +117,37 @@ class gliderData:
         # Dictionary to store acceptable ranges fpr flight parameters
         self.acceptable_ranges = {"dive":{"w":[-0.08, -0.20], "pitch":[-20, -29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]},
                                   "climb":{"w":[0.08, 0.20], "pitch":[20, 29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]}}
-      
-    def getWorkingDirs(self):
-        self.data_dir = "data/" # set directoy path for data
-        self.cache_dir = "/opt/standard-glider-files/Cache/" # set directoy path for cache
+    
+    # No longer needed?
+    # def getWorkingDirs(self):
 
-        # Grabs the glider's name from the data files
-        glider = os.listdir(self.data_dir)
-        for g in glider:
-            if ".tbd" in g:
-                self.glider = g.split("-")[0]
-                break
+    #     # Grabs the glider's name from the data files
+    #     glider = os.listdir(self.data_dir)
+    #     for g in glider:
+    #         if ".tbd" in g:
+    #             self.glider = g.split("-")[0]
+    #             break
+
+    def checkGliderDataDir(self):
+        if self.glider not in os.listdir(self.data_parent_dir):
+            os.makedirs(f"data/{self.glider}")
+            os.makedirs(f"data/{self.glider}/new_data/")
+            os.makedirs(f"data/{self.glider}/processed/")
+            os.makedirs(f"data/{self.glider}/toSend/csv/mostRecentScrape")
+            os.makedirs(f"data/{self.glider}/toSend/csv/timeseries")
+        self.data_dir = f"data/{self.glider}/new_data/"
+
+    def checkNewData(self):
+        files_in_bucket = set(os.listdir(self.gcp_mnt_bucket_dir))
+        files_in_processed = set(os.listdir(f"data/{self.glider}/processed/"))
+        new_files = list(files_in_bucket - files_in_processed)
+        print(new_files)
+
+        # copy not-processed files fom the mounted bucket to data/new_data
+        if len(new_files)>0:
+            for file in new_files:
+                shutil.copy(self.gcp_mnt_bucket_dir+file, self.data_dir)
+
 
     def readRaw(self):
         # interp_fact_keys = ["m_depth", 'sci_flbbcd_bb_units','sci_flbbcd_chlor_units', 'sci_flbbcd_cdom_units','sci_oxy4_oxygen','m_coulomb_amphr_total', 'm_vacuum','m_roll', 'm_pitch', 'm_de_oil_vol', 'sci_water_pressure', 'sci_water_temp', 'sci_water_cond', 'm_lat', 'm_lon']
@@ -163,7 +197,7 @@ class gliderData:
         self.date = datetime.strftime(self.date, "%Y-%b-%d") # convert time strings to datetime
 
         # NOTE: should do somehting here to check for gaps in the data to avoid 
-        self.df = self.df.query("cond > 0")
+        self.df = self.df.query("cond > 0 & cond < 60")
         self.df = self.df.query("temp > -1")
         self.df = self.df.query("sea_pressure > -1")
         self.df.reindex()
@@ -385,6 +419,7 @@ class gliderData:
 
             s_lims = (np.floor(data.df.absolute_salinity.min()-0.5),
             np.ceil(data.df.absolute_salinity.max()+0.5))
+            print(s_lims)
             t_lims = (np.floor(data.df.conservative_temperature.min()-0.5),
                     np.ceil(data.df.conservative_temperature.max()+0.5))
             S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
@@ -541,11 +576,11 @@ class gliderData:
         # self.df = self.df.query("cond > 0")
     
     def moveDataFilesToProcessed(self):
-        prev_calls = os.listdir('data/processed/')
-        prev_calls.remove('.DS_Store')
+        prev_calls = os.listdir(self.processed_dir)
+        if '.DS_Store' in prev_calls: prev_calls.remove('.DS_Store')
 
-        for file in os.listdir("data/new_data"):
-            os.rename(f"data/new_data/{file}", f"data/processed/{file}")
+        for file in os.listdir(self.data_dir):
+            os.rename(f"{self.data_dir}{file}", f"{self.processed_dir}{file}")
 
     def reset(self):
         self.tm = 0
@@ -619,9 +654,9 @@ class gliderData:
 
     def saveDataCsv(self):
         if "new" in self.data_dir:
-            self.df.to_csv(f"data/toSend/csv/mostRecentScrape/{self.glider}_{self.date}_recent_scrape_data.csv")
+            self.df.to_csv(f"data/{self.glider}/toSend/csv/mostRecentScrape/{self.glider}_{self.date}_recent_scrape_data.csv")
         else:
-            self.df.to_csv(f"data/toSend/csv/timeseries/{self.glider}_{self.date}_timeseries.csv")
+            self.df.to_csv(f"data/{self.glider}/toSend/csv/timeseries/{self.glider}_{self.date}_timeseries.csv")
 
     def zipAndDelCsv(self):
         with zipfile.ZipFile('data/toSend/csv.zip', 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zipf:
@@ -633,18 +668,10 @@ class gliderData:
             for file in  os.listdir("data/toSend/csv/"+dir):
                 os.remove("data/toSend/csv/"+dir+"/"+file)
 
-    def checkNewData(self):
-        pass
-
-    def checkGliderDataDir(self):
-        if self.glider not in os.lisdir(self.data_dir):
-            os.mkdir(f"{self.glider}")
-            os.mkdir(f"{self.glider}/new_data/")
-            os.mkdir(f"{self.glider}/processed/")
-        self.data_dir = f"data/{self.glider}/new_data"
-
     def run(self):
-        self.getWorkingDirs()
+        self.checkGliderDataDir()
+        self.checkNewData()
+        # self.getWorkingDirs() # Not used atm
         self.readRaw()
         self.makeDf()
         self.moveDataFilesToProcessed()
@@ -747,7 +774,27 @@ class doEmail:
     
 
 if __name__ == "__main__":
-    gcp.gcs_mount_bucket("amlr-gliders-deployments-dev", "/mnt/deployments/")
-    data = gliderData()
+    # gcp.gcs_mount_bucket("amlr-gliders-deployments-dev", "/mnt/deployments/")
+    print("\n\n",os.listdir("/mnt/deployments/"), "\n\n")
+    arg_parser = argparse.ArgumentParser(description=gliderData.__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    arg_parser.add_argument('deployment',
+        type=str,
+        help='Deployment name, eg amlr03-20220425')
+
+    arg_parser.add_argument('project', 
+        type=str,
+        help='Glider project name', 
+        choices=['FREEBYRD', 'REFOCUS', 'SANDIEGO', 'ECOSWIM'])
+
+    parsed_args = arg_parser.parse_args()
+    data = gliderData(parsed_args)
     data.run()
 
+# [x] The code needs to start by mounting the amlr-dev-#### bucket to /mnt/ using esdglider.gcs_mount_bucket()
+# [x] The code them needs to take in a variable (e.g., $DEPLOYMENT) and find the glider name using the String.split('-') function --> first element is the glider name.
+# [] Will need to implement argparse to be able to take in the deployment name and access GCP secrets to send the email.
+# [] Need to check for existing gliderName directory in /data/ --> if the directory exists, do nothing. If the directory doesn't exist, make the directory and add "new_data" and "processed" subdirectories. 
+# [] Need to change the data file paths to work with f"opt/slocumRtDataVisTooldata/{args.glider}/new_data | processed" where the glider folder is determined by the shell script call to run rtGliderPlots.py.
+# [] Upon mounting the GCP bucket, the code needs to check what files in the bucket it has already processed and which are the new files --> during a deployment, already processed files will be stored on the VM in /opt/slocumRtDataVisTool/data/gliderName/procressed. The code will compare the lists of files in the bucket and locally and copy the remaining files to /opt/slocumRtDataVisTool/data/gliderName/new_data to be processed.
+# [] The code should now run perfectly with no issues whatsoever. 
