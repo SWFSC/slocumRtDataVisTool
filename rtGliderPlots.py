@@ -197,7 +197,7 @@ class gliderData:
 
         # NOTE: should do somehting here to check for gaps in the data to avoid 
         self.df = self.df.query("cond > 0 & cond < 60")
-        self.df = self.df.query("temp > -1")
+        self.df = self.df.query("temp > -1 & temp < 100")
         self.df = self.df.query("sea_pressure > -1")
         self.df.reindex()
 
@@ -711,7 +711,8 @@ class doEmail:
         self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"] #nmfs.swfsc.esd-gliders@noaa.gov , "jacob.partida@noaa.gov", 
                         #    "jen.walsh@noaa.gov", "anthony.cossio@noaa.gov", "christian.reiss@noaa.gov",
                         #    "eric.bjorkstedt@noaa.gov"
-        self.password =  "dyzw kqlu daop oemy" # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
+        print(gcp.access_secret_version('calanus-20241019', 'esdgliders-email'))
+        self.password =  # to fill in on VM  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
     
     def send(self):
         message = MIMEMultipart()
