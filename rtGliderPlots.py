@@ -59,7 +59,7 @@ class gliderData:
         gcp_bucket_dep_date.strip()
         self.processed_dir = f"data/{self.glider}/processed/"
         self.data_dir = f"data/{self.glider}/new_data/" # set data dir specific to glider
-        self.data_parent_dir = "data/" # set parent dir for data folders (any glider)
+        self.data_parent_dir = "./data/" # set parent dir for data folders (any glider)
         self.cache_dir = "/opt/standard-glider-files/Cache/" # set directoy path for cache
         self.gcp_mnt_bucket_dir = f"/mnt/gcs/deployments/{self.project}/{gcp_bucket_dep_date}/{self.deployment}/data/binary/rt/"
 
@@ -141,7 +141,6 @@ class gliderData:
         files_in_bucket = set(os.listdir(self.gcp_mnt_bucket_dir))
         files_in_processed = set(os.listdir(f"data/{self.glider}/processed/"))
         new_files = list(files_in_bucket - files_in_processed)
-        print(new_files)
 
         # copy not-processed files fom the mounted bucket to data/new_data
         if len(new_files)>0:
@@ -419,7 +418,6 @@ class gliderData:
 
             s_lims = (np.floor(data.df.absolute_salinity.min()-0.5),
             np.ceil(data.df.absolute_salinity.max()+0.5))
-            print(s_lims)
             t_lims = (np.floor(data.df.conservative_temperature.min()-0.5),
                     np.ceil(data.df.conservative_temperature.max()+0.5))
             S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
@@ -775,7 +773,6 @@ class doEmail:
 
 if __name__ == "__main__":
     # gcp.gcs_mount_bucket("amlr-gliders-deployments-dev", "/mnt/deployments/")
-    print("\n\n",os.listdir("/mnt/gcs/deployments/"), "\n\n")
     arg_parser = argparse.ArgumentParser(description=gliderData.__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     arg_parser.add_argument('deployment',
