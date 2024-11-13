@@ -61,7 +61,7 @@ class gliderData:
         self.data_dir = f"data/{self.glider}/new_data/" # set data dir specific to glider
         self.data_parent_dir = "data/" # set parent dir for data folders (any glider)
         self.cache_dir = "/opt/standard-glider-files/Cache/" # set directoy path for cache
-        self.gcp_mnt_bucket_dir = f"/mnt/deployments/{self.project}/{gcp_bucket_dep_date}/{self.deployment}/data/binary/rt/"
+        self.gcp_mnt_bucket_dir = f"/mnt/gcs/deployments/{self.project}/{gcp_bucket_dep_date}/{self.deployment}/data/binary/rt/"
 
         self.date = ""
         
@@ -775,7 +775,7 @@ class doEmail:
 
 if __name__ == "__main__":
     # gcp.gcs_mount_bucket("amlr-gliders-deployments-dev", "/mnt/deployments/")
-    print("\n\n",os.listdir("/mnt/deployments/"), "\n\n")
+    print("\n\n",os.listdir("/mnt/gcs/deployments/"), "\n\n")
     arg_parser = argparse.ArgumentParser(description=gliderData.__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     arg_parser.add_argument('deployment',
