@@ -53,16 +53,18 @@ class gliderData:
         self.glider = self.deployment.split("-")[0]
         self.project = args.project
         self.max_amphrs = 800
+        self.new_data_bool = False
 
         # Data path info
         gcp_bucket_dep_date = self.deployment.split("-")[1][0:4]
         gcp_bucket_dep_date.strip()
-        self.processed_dir = f"data/{self.glider}/processed/"
-        self.data_dir = f"data/{self.glider}/new_data/" # set data dir specific to glider
-        self.data_parent_dir = "./data/" # set parent dir for data folders (any glider)
+        self.processed_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/"
+        self.data_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/" # set data dir specific to glider
+        self.data_parent_dir = "/opt/slocumRtDataVisTool/data/" # set parent dir for data folders (any glider)
         self.cache_dir = "/opt/standard-glider-files/Cache/" # set directoy path for cache
         self.gcp_mnt_bucket_dir = f"/mnt/gcs/deployments/{self.project}/{gcp_bucket_dep_date}/{self.deployment}/data/binary/rt/"
-
+        self.image_dir = f"/opt/slocumRtDataVisTool/images/{self.glider}/"
+        self.image_parent_dir = f"/opt/slocumRtDataVisTool/images/"
         self.date = ""
         
         # Eng data defaults
@@ -130,23 +132,40 @@ class gliderData:
 
     def checkGliderDataDir(self):
         if self.glider not in os.listdir(self.data_parent_dir):
-            os.makedirs(f"data/{self.glider}")
-            os.makedirs(f"data/{self.glider}/new_data/")
-            os.makedirs(f"data/{self.glider}/processed/")
-            os.makedirs(f"data/{self.glider}/toSend/csv/mostRecentScrape")
-            os.makedirs(f"data/{self.glider}/toSend/csv/timeseries")
-        self.data_dir = f"data/{self.glider}/new_data/"
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}")
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/")
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/")
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape")
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries")
+        self.data_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/"
+
+        if self.glider not in os.listdir(self.image_parent_dir):
+            os.makedirs(self.image_dir)
+            if "sent" not in os.listdir(self.image_dir):
+                os.makedirs(self.image_dir+"sent/")
+            if "toSend" not in os.listdir(self.image_dir):
+                os.makedirs(self.image_dir+"toSend/")
 
     def checkNewData(self):
         files_in_bucket = set(os.listdir(self.gcp_mnt_bucket_dir))
-        files_in_processed = set(os.listdir(f"data/{self.glider}/processed/"))
+        files_in_processed = set(os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/"))
         new_files = list(files_in_bucket - files_in_processed)
 
         # copy not-processed files fom the mounted bucket to data/new_data
         if len(new_files)>0:
+            self.new_data_bool = True
             for file in new_files:
                 shutil.copy(self.gcp_mnt_bucket_dir+file, self.data_dir)
+        else:
+            self.sendNoData()
 
+    def sendNoData(self):
+        image_dir = f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/"
+        csv_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv.zip"
+        email_doer = doEmail(image_dir, csv_dir, self.glider, self.date, self.n_yos, self.n_yos_tot, 
+                             self.dive_start, self.dive_end, self.dep_start, self.dep_end)
+
+        email_doer.sendNoData()
 
     def readRaw(self):
         # interp_fact_keys = ["m_depth", 'sci_flbbcd_bb_units','sci_flbbcd_chlor_units', 'sci_flbbcd_cdom_units','sci_oxy4_oxygen','m_coulomb_amphr_total', 'm_vacuum','m_roll', 'm_pitch', 'm_de_oil_vol', 'sci_water_pressure', 'sci_water_temp', 'sci_water_cond', 'm_lat', 'm_lon']
@@ -263,6 +282,7 @@ class gliderData:
         self.df['conservative_temperature'] = ct
 
         self.df = self.df.query('absolute_salinity > 0')
+        self.df.query('conservative_temperature > 0 & conservative_temperature < 100')
 
     def calcW(self):
         prof_inds = self.df.profile_index.values
@@ -371,10 +391,10 @@ class gliderData:
                  \n\nProblem profiles: \n{np.unique(self.problem_dives)}", 
                  verticalalignment='top', c = 'k', fontsize=16)
         
-        if self.data_dir == "data/processed/":
-            plt.savefig(f"images/toSend/{self.glider}_flight_panel_full_time_series.png")
+        if self.data_dir == f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/":
+            plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_flight_panel_full_time_series.png")
         else:
-            plt.savefig(f"images/toSend/{self.glider}_flight_panel_{self.date}.png")
+            plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_flight_panel_{self.date}.png")
         # plt.show()
     
     def makeSciDpPanel(self):
@@ -393,10 +413,10 @@ class gliderData:
                 axs[i].scatter(self.df[var], self.df.depth_m, s=5, label=var)
                 axs[i].legend()
 
-        if self.data_dir == "data/processed/":
-            plt.savefig(f"images/toSend/{self.glider}_depth_profiles_full_time_series.png")
+        if self.data_dir == f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/":
+            plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_depth_profiles_full_time_series.png")
         else:
-            plt.savefig(f"images/toSend/{self.glider}_depth_profiles_{self.date}.png")
+            plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_depth_profiles_{self.date}.png")
         # plt.show()
 
     def makeSciTSPanel(self):
@@ -420,6 +440,7 @@ class gliderData:
             np.ceil(data.df.absolute_salinity.max()+0.5))
             t_lims = (np.floor(data.df.conservative_temperature.min()-0.5),
                     np.ceil(data.df.conservative_temperature.max()+0.5))
+            print(t_lims)
             S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
             T = np.arange(t_lims[0],t_lims[1]+0.1,0.1)
             Tg, Sg = np.meshgrid(T,S)
@@ -458,13 +479,13 @@ class gliderData:
             lon_range = glider_lon_max-glider_lon_min
             lat_range = glider_lat_max-glider_lat_min
 
-            if f"{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}" in os.listdir("mapPickles/"):
-                with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}", "rb") as fd:
+            if f"{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}" in os.listdir("/opt/slocumRtDataVisTool/mapPickles/"):
+                with open(f"/opt/slocumRtDataVisTool/mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}", "rb") as fd:
                     map = pickle.load(fd)
             else:
                 map = Basemap(llcrnrlon=glider_lon_min-.05, llcrnrlat=glider_lat_min-.01,
                             urcrnrlon=glider_lon_max+.01, urcrnrlat=glider_lat_max+.05, resolution='f') # create map object
-                with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}", "wb") as fd:
+                with open(f"/opt/slocumRtDataVisTool/mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}", "wb") as fd:
                     pickle.dump(map, fd, protocol=-1)
 
             map.drawcoastlines()
@@ -483,13 +504,13 @@ class gliderData:
             axins.set_xlim(glider_lon_min-3, glider_lon_max+3)
             axins.set_ylim(glider_lat_min-3, glider_lat_max+3)
 
-            if f"{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset" in os.listdir("mapPickles/"):
-                with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset", "rb") as fd:
+            if f"{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset" in os.listdir("/opt/slocumRtDataVisTool/mapPickles/"):
+                with open(f"/opt/slocumRtDataVisTool/mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset", "rb") as fd:
                     map_in = pickle.load(fd)
             else:
                 map_in = Basemap(llcrnrlon=glider_lon_min-3, llcrnrlat=glider_lat_min-3,
                             urcrnrlon=glider_lon_max+3, urcrnrlat=glider_lat_max+3, resolution='f') # create map object
-                with open(f"mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset", "wb") as fd:
+                with open(f"/opt/slocumRtDataVisTool/mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset", "wb") as fd:
                     pickle.dump(map_in, fd, protocol=-1)
 
             map_in.drawcoastlines()
@@ -505,10 +526,10 @@ class gliderData:
             map_in.scatter(x, y, c='r', s=100, alpha=0.25)
             # mark_inset(ax3, axins, loc1=2, loc2=4, fc="none", ec="0.5")
             
-            if self.data_dir == "data/processed/":
-                plt.savefig(f"images/toSend/{self.glider}_{var}_ts_panel_full_time_series.png")
+            if self.data_dir == f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/":
+                plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_{var}_ts_panel_full_time_series.png")
             else:
-                plt.savefig(f"images/toSend/{self.glider}_{var}_ts_panel_{self.date}.png")
+                plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_{var}_ts_panel_{self.date}.png")
 
         # fig = plt.figure()
         # ax = fig.add_subplot(projection='3d')   
@@ -604,7 +625,7 @@ class gliderData:
 
         self._data = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
                       "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : [list of values, e.g., roll]}}      
-        self.data_dir = f"data/{self.glider}/processed/"  
+        self.data_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/"  
 
     def makeFullDeploymentPlots(self):
         self.readRaw()
@@ -620,74 +641,75 @@ class gliderData:
         self.saveDataCsv()
     
     def sendEmail(self):
-        image_dir = "images/toSend/"
-        csv_dir = "data/toSend/csv.zip"
+        image_dir = f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/"
+        csv_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv.zip"
         email_doer = doEmail(image_dir, csv_dir, self.glider, self.date, self.n_yos, self.n_yos_tot, 
                              self.dive_start, self.dive_end, self.dep_start, self.dep_end)
         email_doer.send()
 
     def moveImages(self):
-        im_dirs = os.listdir("images/")
-        if "sent" not in im_dirs: os.mkdir("images/sent/")
-        ims_to_move = os.listdir('images/toSend/')
-        ims_to_move.remove('.DS_Store')
+        im_dirs = os.listdir(f"/opt/slocumRtDataVisTool/images/{self.glider}/")
+        if "sent" not in im_dirs: os.mkdir(f"/opt/slocumRtDataVisTool/images/{self.glider}/sent/")
+        ims_to_move = os.listdir(f'/opt/slocumRtDataVisTool/images/{self.glider}/toSend/')
+        if '.DS_Store' in ims_to_move: ims_to_move.remove('.DS_Store')
 
         for file in ims_to_move:
-            os.rename(f"images/toSend/{file}", f"images/sent/{file}")
+            os.rename(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{file}", f"/opt/slocumRtDataVisTool/images/{self.glider}/sent/{file}")
     
-    def packageTimeSeries(Self):
-        if "timeseries" not in os.listdir("images/"):
-            os.mkdir(f"images/timeseries/")
+    def packageTimeSeries(self):
+        if "timeseries" not in os.listdir(f"/opt/slocumRtDataVisTool/images/{self.glider}/"):
+            os.mkdir(f"/opt/slocumRtDataVisTool/images/{self.glider}/timeseries/")
 
-        for file in os.listdir("images/toSend/"):
+        for file in os.listdir(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/"):
             if "time" in file:
-                os.rename("images/toSend/"+ file, "images/timeseries/" + file)
+                os.rename(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/"+ file, f"/opt/slocumRtDataVisTool/images/{self.glider}/timeseries/" + file)
 
-        with zipfile.ZipFile('images/timeseries.zip', 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zipf:
-            zipdir('images/timeseries/', zipf)
+        with zipfile.ZipFile(f'/opt/slocumRtDataVisTool/images/{self.glider}/timeseries.zip', 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zipf:
+            zipdir(f'/opt/slocumRtDataVisTool/images/{self.glider}/timeseries/', zipf)
 
-        for file in os.listdir("images/timeseries/"): os.remove("images/timeseries/"+file)
-        os.removedirs("images/timeseries/")
-        os.rename("images/timeseries.zip", "images/toSend/timeseries.zip")
+        for file in os.listdir(f"/opt/slocumRtDataVisTool/images/{self.glider}/timeseries/"): os.remove(f"/opt/slocumRtDataVisTool/images/{self.glider}/timeseries/"+file)
+        os.removedirs(f"/opt/slocumRtDataVisTool/images/{self.glider}/timeseries/")
+        os.rename(f"/opt/slocumRtDataVisTool/images/{self.glider}/timeseries.zip", f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/timeseries.zip")
 
     def saveDataCsv(self):
         if "new" in self.data_dir:
-            self.df.to_csv(f"data/{self.glider}/toSend/csv/mostRecentScrape/{self.glider}_{self.date}_recent_scrape_data.csv")
+            self.df.to_csv(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape/{self.glider}_{self.date}_recent_scrape_data.csv")
         else:
-            self.df.to_csv(f"data/{self.glider}/toSend/csv/timeseries/{self.glider}_{self.date}_timeseries.csv")
+            self.df.to_csv(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries/{self.glider}_{self.date}_timeseries.csv")
 
     def zipAndDelCsv(self):
-        with zipfile.ZipFile('data/toSend/csv.zip', 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zipf:
-            zipdir('data/toSend/csv/', zipf)
+        with zipfile.ZipFile(f'/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv.zip', 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zipf:
+            zipdir(f'/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/', zipf)
 
-        dirs = os.listdir("data/toSend/csv/")
-        dirs.remove('.DS_Store')
+        dirs = os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/")
+        if '.DS_Store' in dirs: dirs.remove('.DS_Store')
         for dir in dirs: 
-            for file in  os.listdir("data/toSend/csv/"+dir):
-                os.remove("data/toSend/csv/"+dir+"/"+file)
+            for file in  os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/"+dir):
+                os.remove(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/"+dir+"/"+file)
 
     def run(self):
         self.checkGliderDataDir()
         self.checkNewData()
-        # self.getWorkingDirs() # Not used atm
-        self.readRaw()
-        self.makeDf()
-        self.moveDataFilesToProcessed()
-        self.getProfiles()
-        self.calcDensitySA()
-        self.calcW()
-        self.makeSegmentedDf()
-        self.makeDataDisplayStrings()
-        self.makeFlightPanel()
-        self.makeSciTSPanel()
-        self.makeSciDpPanel()
-        self.saveDataCsv()
-        self.reset()
-        self.makeFullDeploymentPlots()
-        self.packageTimeSeries()
-        self.zipAndDelCsv()
-        self.sendEmail()
-        self.moveImages()
+        if self.new_data_bool:
+            # self.getWorkingDirs() # Not used atm
+            self.readRaw()
+            self.makeDf()
+            self.moveDataFilesToProcessed()
+            self.getProfiles()
+            self.calcDensitySA()
+            self.calcW()
+            self.makeSegmentedDf()
+            self.makeDataDisplayStrings()
+            self.makeFlightPanel()
+            self.makeSciTSPanel()
+            self.makeSciDpPanel()
+            self.saveDataCsv()
+            self.reset()
+            self.makeFullDeploymentPlots()
+            self.packageTimeSeries()
+            self.zipAndDelCsv()
+            self.sendEmail()
+            self.moveImages()
 
 
 class doEmail:
@@ -700,20 +722,36 @@ class doEmail:
         self.yos_total = yos_tot
 
         self.subject = f"{self.glider_name} science plots on {self.date}"
+        self.no_data_subject = f"New no data scraped for {self.glider_name}"
 
         self.body = f"This is an automated email and is a prototype for the automated webscrapping application.\nThese data were scraped from SFMC on {self.date} for the glider named \"{self.glider_name}\".\
             \n\n{self.glider_name} performed {self.yos+1:0.0f} half-yos from {dive_start} to {dive_end} prior to the last scrape.\
             \n{self.glider_name} has performed a total of {self.yos_total+1:0.0f} from {dep_start} to {dep_end}.\
             \n\nThe full deployment time series can be downloaded in the attached zipfile.\n\nPlease do not reply to this email, as caleb does not know how to write code to handle that...\
             \n\nFor data questions or concerns, please email caleb.flaim@noaa.gov and sam.woodman@noaa.gov."
+        
+        self.no_data_body = "No new data was found for processing."
 
         self.sender_email = "esdgliders@gmail.com"
         self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"] #nmfs.swfsc.esd-gliders@noaa.gov , "jacob.partida@noaa.gov", 
                         #    "jen.walsh@noaa.gov", "anthony.cossio@noaa.gov", "christian.reiss@noaa.gov",
                         #    "eric.bjorkstedt@noaa.gov"
-        print(gcp.access_secret_version('calanus-20241019', 'esdgliders-email'))
-        self.password =  # to fill in on VM  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
+        self.password =   # to fill in on VM  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
     
+    def sendNoData(self):
+        message = MIMEMultipart()
+        message["From"] = self.sender_email
+        message["To"] = ", ".join(self.recipiants)
+        message["Subject"] = self.no_data_subject
+        message["Bcc"] = "esdgliders@gmail.com"  # Recommended for mass emails
+        message.attach(MIMEText(self.no_data_body, "plain"))
+
+        text = message.as_string()
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+            server.login(self.sender_email, self.password)
+            server.sendmail(self.sender_email, self.recipiants, text)
+
     def send(self):
         message = MIMEMultipart()
         message["From"] = self.sender_email
@@ -724,7 +762,7 @@ class doEmail:
         # Add body to email
         message.attach(MIMEText(self.body, "plain"))
         foo = os.listdir(self.image_dir)
-        foo.remove(".DS_Store")
+        if ".DS_Store" in foo: foo.remove(".DS_Store")
         for file in foo:
             with open(self.image_dir+"/"+file, "rb") as attachment:
                 # Add file as application/octet-stream
