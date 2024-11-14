@@ -24,6 +24,7 @@ from google.cloud import secretmanager
 import google_crc32c
 # import pyglider.utils as pgu
 import esdglider.gcp as gcp
+import logging
 
 # Email modules
 import email, smtplib, ssl
@@ -48,6 +49,19 @@ def returnNan(t, v):
 
 class gliderData:
     def __init__(self, args):
+        if args.logfile == "":
+            logging.basicConfig(
+            format='%(asctime)s %(module)s:%(levelname)s:%(message)s [line %(lineno)d]', 
+            level=getattr(logging, args.loglevel.upper()), 
+            datefmt="%Y-%m-%d %H:%M:%S")
+        else:
+            logging.basicConfig(
+            filename=args.logfile,
+            filemode="a",
+            format='%(asctime)s %(module)s:%(levelname)s:%(message)s [line %(lineno)d]', 
+            level=getattr(logging, args.loglevel.upper()), 
+            datefmt="%Y-%m-%d %H:%M:%S")
+
         # Glider info
         self.deployment = args.deployment
         self.glider = self.deployment.split("-")[0]
@@ -131,15 +145,20 @@ class gliderData:
     #             break
 
     def checkGliderDataDir(self):
+        logging.info("Checking for existing glider directory.")
         if self.glider not in os.listdir(self.data_parent_dir):
+            logging.info(f"Making new data directory for {self.glider}")
+
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}")
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/")
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/")
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape")
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries")
+
         self.data_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/"
 
         if self.glider not in os.listdir(self.image_parent_dir):
+            logging.info(f"Making new image directory for {self.glider}")
             os.makedirs(self.image_dir)
             if "sent" not in os.listdir(self.image_dir):
                 os.makedirs(self.image_dir+"sent/")
@@ -147,17 +166,23 @@ class gliderData:
                 os.makedirs(self.image_dir+"toSend/")
 
     def checkNewData(self):
+        logging.info("Checking for new s/tbd files in mounted bucket.")
+
         files_in_bucket = set(os.listdir(self.gcp_mnt_bucket_dir))
         files_in_processed = set(os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/"))
         new_files = list(files_in_bucket - files_in_processed)
 
         # copy not-processed files fom the mounted bucket to data/new_data
         if len(new_files)>0:
+            logging.info(f"New files found! Moving to {self.data_dir}")
             self.new_data_bool = True
             for file in new_files:
                 shutil.copy(self.gcp_mnt_bucket_dir+file, self.data_dir)
+
         else:
+            logging.info("No new data found. Sending email.")
             self.sendNoData()
+            logging.info("No data email sent.")
 
     def sendNoData(self):
         image_dir = f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/"
@@ -174,6 +199,7 @@ class gliderData:
         #     interp_fact[key] = returnNan
 
         # Creates dbd reader object
+        logging.info("Reading in raw binary files")
         dbd = dbdreader.MultiDBD(pattern=self.data_dir+'*.[st]bd', cacheDir=self.cache_dir, complemented_files_only=True)
 
         # Set class variables to data arrays from dbdreader. 
@@ -193,8 +219,10 @@ class gliderData:
         #     print("%2d: %s"%(i,p))
 
         dbd.close()
+        logging.info("Binary files successfully read in.")
 
     def makeDf(self): 
+        logging.info("Making pandas dataframe.")
         # creates temporary time list after converting time from ns to datetime strings
         _dt = np.array([dbdreader.dbdreader.epochToDateTimeStr(t, timeformat='%H:%M:%S') for t in self.tm])
         time = np.array([t[0]+ ' ' +t[1] for t in _dt]) # combines separate data and time strings into a singular string
@@ -214,13 +242,16 @@ class gliderData:
         self.date = np.max(self.df.time)
         self.date = datetime.strftime(self.date, "%Y-%b-%d") # convert time strings to datetime
 
+        logging.info("Filtering bogus values.")
         # NOTE: should do somehting here to check for gaps in the data to avoid 
         self.df = self.df.query("cond > 0 & cond < 60")
         self.df = self.df.query("temp > -1 & temp < 100")
         self.df = self.df.query("sea_pressure > -1")
         self.df.reindex()
+        logging.info("Dataframe made successfully!")
 
     def getProfiles(self):
+        logging.info("Looking for profiles.")
         # Code taken and modified from pyglider to work with pandas
         min_dp=10.0
         inversion=3.
@@ -257,6 +288,7 @@ class gliderData:
         self.df['profile_index'] = profile
         self.df['profile_direction'] = direction
 
+        logging.info("Profiles added to dataframe.")
         if "new" in self.data_dir:
             self.n_yos = np.max(self.df.profile_index) - np.min(self.df.profile_index)
             self.dive_start = datetime.strftime(np.min(self.df.time), "%Y-%b-%d %H:%M")
@@ -267,6 +299,7 @@ class gliderData:
             self.dep_end = datetime.strftime(np.max(self.df.time), "%Y-%b-%d %H:%M")
 
     def calcDensitySA(self):
+        logging.info("Calculating SA, rho, CT.")
         # calculate water density
         sp = gsw.conversions.SP_from_C(self.df.cond, self.df.temp, self.df.sea_pressure) # calculate practical sal from conductivity
         sa = gsw.conversions.SA_from_SP(sp, self.df.sea_pressure, lon=np.nanmean(self.df.lon), lat=np.nanmean(self.df.lat)) # calculate absolute salinity from practical sal and lat/lon
@@ -281,10 +314,13 @@ class gliderData:
         self.df['sigma'] = sigma
         self.df['conservative_temperature'] = ct
 
-        self.df = self.df.query('absolute_salinity > 0')
-        self.df.query('conservative_temperature > 0 & conservative_temperature < 100')
+        logging.info("Filtering bogus values.")
+        self.df = self.df.query('absolute_salinity > 0 & absolute_salinity < 60')
+        self.df.query('conservative_temperature > 0 & conservative_temperature < 50')
+        logging.info("SA, rhp, CT added to data frame.")
 
     def calcW(self):
+        logging.info("Calculating vertical speed.")
         prof_inds = self.df.profile_index.values
         t = np.float64(self.df.time.values)
 
@@ -304,8 +340,11 @@ class gliderData:
                 model.fit(t_sub, d_sub)
                 d_pred = model.predict(t_sub)
                 w = -1*model.coef_[0][0]*np.power(10,9) # convert to m/s from m/ns
+                logging.info(f"Vertical speed for profile{val} is {w} m/s.")
+        logging.info("Vertical velocities calculated successfuly.")
 
     def makeDataDisplayStrings(self):
+        logging.info("Making display strings.")
         keys = self.data_strings.keys()
         for key in keys:
             sub_keys = self.data_strings[key].keys()
@@ -336,8 +375,10 @@ class gliderData:
                         self.problem_dives.append(f"{self._data[key][sub_key].index(var_max) + 1}")
                     else:
                         self.problem_dives.append(f"{self._data[key][sub_key].index(var_max) + 2}")
+        logging.info("Display strings finished successfully.")
 
     def makeFlightPanel(self): # needs to be pointed to a save directory
+        logging.info("Making flight data panel.")
         fig = plt.figure(constrained_layout = True, figsize=(11, 8.5))
         gs = fig.add_gridspec(6, 7)
         ax1 = fig.add_subplot(gs[0:3, :5])
@@ -393,11 +434,16 @@ class gliderData:
         
         if self.data_dir == f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/":
             plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_flight_panel_full_time_series.png")
+            logging.info("Saved flight panel for timeseries.")
         else:
             plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_flight_panel_{self.date}.png")
+            logging.info("Saved flight panel for new data.")
+        
+        logging.info("Flight panel finished successfully.")
         # plt.show()
     
     def makeSciDpPanel(self):
+        logging.info("Making depth profiles.")
         fig, axs = plt.subplots(nrows=1, ncols=4, figsize=(11, 4), sharey=True)
         axs[0].invert_yaxis()
         axs[0].set_ylabel("Depth [m]")
@@ -415,13 +461,17 @@ class gliderData:
 
         if self.data_dir == f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/":
             plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_depth_profiles_full_time_series.png")
+            logging.info("Saved depth profiles for timeseries.")
         else:
             plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_depth_profiles_{self.date}.png")
+            logging.info("Saved depth profiles for new data.")
         # plt.show()
 
     def makeSciTSPanel(self):
+        logging.info("Makinf TS plots.")
         # code adapted from Jacob Partida
         for var in self.sci_vars:
+            logging.info(f"Making {var} TS plot")
             fig = plt.figure(constrained_layout = True, figsize=(15, 8.5))
             gs = fig.add_gridspec(6, 7)
             ax1 = fig.add_subplot(gs[0:, 0:3])
@@ -440,7 +490,7 @@ class gliderData:
             np.ceil(data.df.absolute_salinity.max()+0.5))
             t_lims = (np.floor(data.df.conservative_temperature.min()-0.5),
                     np.ceil(data.df.conservative_temperature.max()+0.5))
-            print(t_lims)
+
             S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
             T = np.arange(t_lims[0],t_lims[1]+0.1,0.1)
             Tg, Sg = np.meshgrid(T,S)
@@ -528,8 +578,10 @@ class gliderData:
             
             if self.data_dir == f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/":
                 plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_{var}_ts_panel_full_time_series.png")
+                logging.info("Saved TS plots for timeseries.")
             else:
                 plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_{var}_ts_panel_{self.date}.png")
+                logging.info("Saved TS plots for new data.")
 
         # fig = plt.figure()
         # ax = fig.add_subplot(projection='3d')   
@@ -538,6 +590,7 @@ class gliderData:
         # plt.show()
     
     def makeSegmentedDf(self):
+        logging.info("Segmenting datagrame.")
         prof_inds = self.df.profile_index.values
         depth = self.df.depth_m.values
         t = np.float64(self.df.time.values)
@@ -551,6 +604,7 @@ class gliderData:
         dive_bool = np.zeros(len(self.df.time))
 
         for val in np.unique(prof_inds)[0:len(np.unique(prof_inds))-1]: # fill above 'dive_segs' dict with values
+            logging.info(f"Dataframe segmented for profile {val}")
             if val != np.float64('nan'): 
                 start = np.where(prof_inds==val)[0][0]
                 end = np.where(prof_inds==val)[0][-1]
@@ -590,8 +644,10 @@ class gliderData:
                 for sub_key in sub_keys:
                     self._data[parent_key][sub_key].append(float(_vars[sub_key]))
 
+        logging.info("Filtering dataframe for climbs")
         self.df["dive_bool"] = dive_bool
         self.df = self.df.query("dive_bool > 0")
+        logging.info("Climbs removed.")
         # self.df = self.df.query("cond > 0")
     
     def moveDataFilesToProcessed(self):
@@ -600,8 +656,10 @@ class gliderData:
 
         for file in os.listdir(self.data_dir):
             os.rename(f"{self.data_dir}{file}", f"{self.processed_dir}{file}")
+        logging.info(f"Datafiles moved to /data/{self.glider}/processed.")
 
     def reset(self):
+        logging.info("Reseting to make timeseries plots.")
         self.tm = 0
         self.depth = 0
         self.roll = 0
@@ -626,8 +684,10 @@ class gliderData:
         self._data = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
                       "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : [list of values, e.g., roll]}}      
         self.data_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/"  
+        logging.info("gliderData has been reset.")
 
     def makeFullDeploymentPlots(self):
+        logging.info("Making full deployment plots.")
         self.readRaw()
         self.makeDf()
         self.getProfiles()
@@ -639,13 +699,16 @@ class gliderData:
         self.makeSciTSPanel()
         self.makeSciDpPanel()
         self.saveDataCsv()
+        logging.info("Full deployment plots made and saved.")
     
     def sendEmail(self):
+        logging.info("Attaching plots/data and sending email.")
         image_dir = f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/"
         csv_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv.zip"
         email_doer = doEmail(image_dir, csv_dir, self.glider, self.date, self.n_yos, self.n_yos_tot, 
                              self.dive_start, self.dive_end, self.dep_start, self.dep_end)
         email_doer.send()
+        logging.info("Email sent.")
 
     def moveImages(self):
         im_dirs = os.listdir(f"/opt/slocumRtDataVisTool/images/{self.glider}/")
@@ -655,42 +718,52 @@ class gliderData:
 
         for file in ims_to_move:
             os.rename(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{file}", f"/opt/slocumRtDataVisTool/images/{self.glider}/sent/{file}")
-    
+        logging.info("Images moved to sent.")
+
     def packageTimeSeries(self):
         if "timeseries" not in os.listdir(f"/opt/slocumRtDataVisTool/images/{self.glider}/"):
+            logging.info("Making timeseries folder.")
             os.mkdir(f"/opt/slocumRtDataVisTool/images/{self.glider}/timeseries/")
 
         for file in os.listdir(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/"):
             if "time" in file:
                 os.rename(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/"+ file, f"/opt/slocumRtDataVisTool/images/{self.glider}/timeseries/" + file)
 
+        logging.info("Zipping timeseries plots.")
         with zipfile.ZipFile(f'/opt/slocumRtDataVisTool/images/{self.glider}/timeseries.zip', 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zipf:
             zipdir(f'/opt/slocumRtDataVisTool/images/{self.glider}/timeseries/', zipf)
 
         for file in os.listdir(f"/opt/slocumRtDataVisTool/images/{self.glider}/timeseries/"): os.remove(f"/opt/slocumRtDataVisTool/images/{self.glider}/timeseries/"+file)
         os.removedirs(f"/opt/slocumRtDataVisTool/images/{self.glider}/timeseries/")
         os.rename(f"/opt/slocumRtDataVisTool/images/{self.glider}/timeseries.zip", f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/timeseries.zip")
+        logging.info("Timeseries packaged successfully.")
 
     def saveDataCsv(self):
         if "new" in self.data_dir:
             self.df.to_csv(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape/{self.glider}_{self.date}_recent_scrape_data.csv")
+            logging.info("New data saved into CSV file.")
         else:
             self.df.to_csv(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries/{self.glider}_{self.date}_timeseries.csv")
+            logging.info("Timeseries saved into CSV file.")
 
     def zipAndDelCsv(self):
         with zipfile.ZipFile(f'/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv.zip', 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zipf:
             zipdir(f'/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/', zipf)
+        logging.info("New and timeseries csv data zipped")
 
         dirs = os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/")
         if '.DS_Store' in dirs: dirs.remove('.DS_Store')
         for dir in dirs: 
             for file in  os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/"+dir):
                 os.remove(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/"+dir+"/"+file)
+        logging.info("Unzipped CSV data deleted.")
 
     def run(self):
+        logging.info("Running gliderData.")
         self.checkGliderDataDir()
         self.checkNewData()
         if self.new_data_bool:
+            logging.info("New data found: making plots.")
             # self.getWorkingDirs() # Not used atm
             self.readRaw()
             self.makeDf()
@@ -710,6 +783,8 @@ class gliderData:
             self.zipAndDelCsv()
             self.sendEmail()
             self.moveImages()
+            logging.info("Plots generated and sent. Code done.")
+        else: logging.info("No new data found. Code done.")
 
 
 class doEmail:
@@ -822,6 +897,17 @@ if __name__ == "__main__":
         type=str,
         help='Glider project name', 
         choices=['FREEBYRD', 'REFOCUS', 'SANDIEGO', 'ECOSWIM'])
+
+    arg_parser.add_argument('-l', '--loglevel',
+        type=str,
+        help='Verbosity level',
+        choices=['debug', 'info', 'warning', 'error', 'critical'],
+        default='info')
+    
+    arg_parser.add_argument('--logfile',
+        type=str,
+        help='File to which to write logs',
+        default='')
 
     parsed_args = arg_parser.parse_args()
     data = gliderData(parsed_args)
