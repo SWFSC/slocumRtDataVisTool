@@ -155,15 +155,28 @@ class gliderData:
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape")
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries")
 
+        if "new_data" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/")
+        if "processed" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/")
+        if "toSend" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape")
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries")
+        if "mostRecentScrape" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/"):
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape")
+        if "timeseries" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/"):
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries")
+
+
         self.data_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/"
 
         if self.glider not in os.listdir(self.image_parent_dir):
             logging.info(f"Making new image directory for {self.glider}")
             os.makedirs(self.image_dir)
-            if "sent" not in os.listdir(self.image_dir):
-                os.makedirs(self.image_dir+"sent/")
-            if "toSend" not in os.listdir(self.image_dir):
-                os.makedirs(self.image_dir+"toSend/")
+        if "sent" not in os.listdir(self.image_dir):
+            os.makedirs(self.image_dir+"sent/")
+        if "toSend" not in os.listdir(self.image_dir):
+            os.makedirs(self.image_dir+"toSend/")
 
     def checkNewData(self):
         logging.info("Checking for new s/tbd files in mounted bucket.")
@@ -316,7 +329,7 @@ class gliderData:
 
         logging.info("Filtering bogus values.")
         self.df = self.df.query('absolute_salinity > 0 & absolute_salinity < 60')
-        self.df.query('conservative_temperature > 0 & conservative_temperature < 50')
+        self.df = self.df.query('conservative_temperature > 0 & conservative_temperature < 50')
         logging.info("SA, rhp, CT added to data frame.")
 
     def calcW(self):
@@ -490,7 +503,7 @@ class gliderData:
             np.ceil(data.df.absolute_salinity.max()+0.5))
             t_lims = (np.floor(data.df.conservative_temperature.min()-0.5),
                     np.ceil(data.df.conservative_temperature.max()+0.5))
-
+            # print(t_lims)
             S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
             T = np.arange(t_lims[0],t_lims[1]+0.1,0.1)
             Tg, Sg = np.meshgrid(T,S)
@@ -696,6 +709,9 @@ class gliderData:
         self.makeSegmentedDf()
         self.makeDataDisplayStrings()
         self.makeFlightPanel()
+        logging.info("Filtering bogus values.")
+        self.df = self.df.query('absolute_salinity > 0 & absolute_salinity < 60')
+        self.df = self.df.query('conservative_temperature > 0 & conservative_temperature < 50')
         self.makeSciTSPanel()
         self.makeSciDpPanel()
         self.saveDataCsv()
@@ -811,7 +827,7 @@ class doEmail:
         self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"] #nmfs.swfsc.esd-gliders@noaa.gov , "jacob.partida@noaa.gov", 
                         #    "jen.walsh@noaa.gov", "anthony.cossio@noaa.gov", "christian.reiss@noaa.gov",
                         #    "eric.bjorkstedt@noaa.gov"
-        self.password =   # to fill in on VM  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
+        self.password =  "dyzw kqlu daop oemy" # to fill in on VM  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
     
     def sendNoData(self):
         message = MIMEMultipart()
