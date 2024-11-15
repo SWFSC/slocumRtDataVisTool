@@ -66,7 +66,8 @@ class gliderData:
         self.deployment = args.deployment
         self.glider = self.deployment.split("-")[0]
         self.project = args.project
-        self.max_amphrs = 800
+        self.max_amphrs = args.amphours
+        print(self.max_amphrs)
         self.new_data_bool = False
 
         # Data path info
@@ -138,6 +139,7 @@ class gliderData:
 
     def checkGliderDataDir(self):
         logging.info("Checking for existing glider directory.")
+
         if self.glider not in os.listdir(self.data_parent_dir):
             logging.info(f"Making new data directory for {self.glider}")
 
@@ -147,8 +149,6 @@ class gliderData:
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape/")
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries/")
 
-        # File "/opt/slocumRtDataVisTool/rtGliderPlots.py", line 165, in checkGliderDataDir
-        #if "mostRecentScrape" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/"):  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
         if "new_data" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/")
         if "processed" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
@@ -828,7 +828,7 @@ class doEmail:
         self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"] #nmfs.swfsc.esd-gliders@noaa.gov , "jacob.partida@noaa.gov", 
                         #    "jen.walsh@noaa.gov", "anthony.cossio@noaa.gov", "christian.reiss@noaa.gov",
                         #    "eric.bjorkstedt@noaa.gov"
-        self.password =   # to fill in on VM  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
+        self.password =  "dyzw kqlu daop oemy" # to fill in on VM  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
     
     def sendNoData(self):
         message = MIMEMultipart()
@@ -925,6 +925,10 @@ if __name__ == "__main__":
         type=str,
         help='File to which to write logs',
         default='')
+
+    arg_parser.add_argument('amphours',
+        type=int,
+        help='e.g., 300 Ahrs, 800 Ahrs')
 
     parsed_args = arg_parser.parse_args()
     data = gliderData(parsed_args)
