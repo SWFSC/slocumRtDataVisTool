@@ -155,13 +155,17 @@ class gliderData:
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape/")
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries/")
 
+        # File "/opt/slocumRtDataVisTool/rtGliderPlots.py", line 165, in checkGliderDataDir
+            #if "mostRecentScrape" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/"):
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
         if "new_data" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/")
         if "processed" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/")
         if "toSend" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
-            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape/")
-            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries/")
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/")
+        if "csv" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend"):
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv")
         if "mostRecentScrape" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/"):
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape/")
         if "timeseries" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/"):
@@ -701,6 +705,7 @@ class gliderData:
 
     def makeFullDeploymentPlots(self):
         logging.info("Making full deployment plots.")
+        self.checkGliderDataDir()
         self.readRaw()
         self.makeDf()
         self.getProfiles()
