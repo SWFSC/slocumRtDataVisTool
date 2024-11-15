@@ -152,20 +152,20 @@ class gliderData:
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}")
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/")
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/")
-            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape")
-            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries")
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape/")
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries/")
 
         if "new_data" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/")
         if "processed" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/")
         if "toSend" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
-            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape")
-            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries")
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape/")
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries/")
         if "mostRecentScrape" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/"):
-            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape")
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/mostRecentScrape/")
         if "timeseries" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/"):
-            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries")
+            os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries/")
 
 
         self.data_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/"
