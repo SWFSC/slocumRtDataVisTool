@@ -75,7 +75,8 @@ class gliderData:
         self.processed_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/"
         self.data_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/" # set data dir specific to glider
         self.data_parent_dir = "/opt/slocumRtDataVisTool/data/" # set parent dir for data folders (any glider)
-        self.cache_dir = "/opt/standard-glider-files/Cache/" # set directoy path for cache
+        # self.cache_dir = "/opt/standard-glider-files/Cache/" # set directoy path for cache
+        self.cache_dir = "/mnt/gcs/deployments/cache/" # set directoy path for cache
         self.gcp_mnt_bucket_dir = f"/mnt/gcs/deployments/{self.project}/{gcp_bucket_dep_date}/{self.deployment}/data/binary/rt/"
         self.image_dir = f"/opt/slocumRtDataVisTool/images/{self.glider}/"
         self.image_parent_dir = f"/opt/slocumRtDataVisTool/images/"
@@ -134,15 +135,6 @@ class gliderData:
         self.acceptable_ranges = {"dive":{"w":[-0.08, -0.20], "pitch":[-20, -29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]},
                                   "climb":{"w":[0.08, 0.20], "pitch":[20, 29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]}}
     
-    # No longer needed?
-    # def getWorkingDirs(self):
-
-    #     # Grabs the glider's name from the data files
-    #     glider = os.listdir(self.data_dir)
-    #     for g in glider:
-    #         if ".tbd" in g:
-    #             self.glider = g.split("-")[0]
-    #             break
 
     def checkGliderDataDir(self):
         logging.info("Checking for existing glider directory.")
@@ -421,7 +413,7 @@ class gliderData:
         ax5.set_xticks([])
         ax5.set_yticks([])
 
-        ax1.set_title(f"{self.glider} profiles {np.unique(self.df.profile_index)[0]} - {np.unique(self.df.profile_index)[-2]}")
+        ax1.set_title(f"{self.glider} profiles {np.unique(self.df.profile_index)[0]} - {np.unique(self.df.profile_index)[-1]}")
         ax1.invert_yaxis()
         ax1.set_ylabel("Depth [m]")
         ax2.set_ylabel("Pitch [deg]")
@@ -675,6 +667,7 @@ class gliderData:
 
         for file in os.listdir(self.data_dir):
             os.rename(f"{self.data_dir}{file}", f"{self.processed_dir}{file}")
+            logging.info(f"Moved {self.data_dir}{file} to {self.processed_dir}{file}.")
         logging.info(f"Datafiles moved to /data/{self.glider}/processed.")
 
     def reset(self):
@@ -707,7 +700,7 @@ class gliderData:
 
     def makeFullDeploymentPlots(self):
         logging.info("Making full deployment plots.")
-        self.checkGliderDataDir()
+        # self.checkGliderDataDir()
         self.readRaw()
         self.makeDf()
         self.getProfiles()
