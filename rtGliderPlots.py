@@ -156,8 +156,7 @@ class gliderData:
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/timeseries/")
 
         # File "/opt/slocumRtDataVisTool/rtGliderPlots.py", line 165, in checkGliderDataDir
-            #if "mostRecentScrape" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/"):
-                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        #if "mostRecentScrape" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv/"):  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
         if "new_data" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/")
         if "processed" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
@@ -198,14 +197,14 @@ class gliderData:
 
         else:
             logging.info("No new data found. Sending email.")
-            self.sendNoData()
+            self.sendNoData("No new data was found for processing.")
             logging.info("No data email sent.")
 
-    def sendNoData(self):
+    def sendNoData(self, msg):
         image_dir = f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/"
         csv_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/toSend/csv.zip"
         email_doer = doEmail(image_dir, csv_dir, self.glider, self.date, self.n_yos, self.n_yos_tot, 
-                             self.dive_start, self.dive_end, self.dep_start, self.dep_end)
+                             self.dive_start, self.dive_end, self.dep_start, self.dep_end, msg)
 
         email_doer.sendNoData()
 
@@ -214,29 +213,32 @@ class gliderData:
         # interp_fact = {}
         # for key in interp_fact_keys:
         #     interp_fact[key] = returnNan
-
+        try:
         # Creates dbd reader object
-        logging.info("Reading in raw binary files")
-        dbd = dbdreader.MultiDBD(pattern=self.data_dir+'*.[st]bd', cacheDir=self.cache_dir, complemented_files_only=True)
+            logging.info("Reading in raw binary files")
+            dbd = dbdreader.MultiDBD(pattern=self.data_dir+'*.[st]bd', cacheDir=self.cache_dir, complemented_files_only=True)
 
-        # Set class variables to data arrays from dbdreader. 
-        # NOTE: order of these is arbitrary, but depth must be second!
-        self.tm, self.depth, self.backscatter, self.chlor, self.cdom, self.o2, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.pressure, self.temp, self.cond, self.lat, self.lon = dbd.get_sync("m_depth", 'sci_flbbcd_bb_units','sci_flbbcd_chlor_units', 'sci_flbbcd_cdom_units','sci_oxy4_oxygen','m_coulomb_amphr_total', 'm_vacuum','m_roll', 'm_pitch', 'm_de_oil_vol', 'sci_water_pressure', 'sci_water_temp', 'sci_water_cond', 'm_lat', 'm_lon', interpolating_function_factory=None)
-        
-        self.roll, self.pitch = self.roll*180/np.pi, self.pitch*180/np.pi # convert roll and pitch from rad to deg
-        self.sea_pressure = self.pressure * 10 - 10.1325 # convert pressure to sea pressure in dbar for GSW
-        self.cond = self.cond * 10 # convert cond from s/m to mS/cm for GSW
+            # Set class variables to data arrays from dbdreader. 
+            # NOTE: order of these is arbitrary, but depth must be second!
+            self.tm, self.depth, self.backscatter, self.chlor, self.cdom, self.o2, self.amphr, self.vacuum, self.roll, self.pitch, self.oil_vol, self.pressure, self.temp, self.cond, self.lat, self.lon = dbd.get_sync("m_depth", 'sci_flbbcd_bb_units','sci_flbbcd_chlor_units', 'sci_flbbcd_cdom_units','sci_oxy4_oxygen','m_coulomb_amphr_total', 'm_vacuum','m_roll', 'm_pitch', 'm_de_oil_vol', 'sci_water_pressure', 'sci_water_temp', 'sci_water_cond', 'm_lat', 'm_lon', interpolating_function_factory=None)
+            
+            self.roll, self.pitch = self.roll*180/np.pi, self.pitch*180/np.pi # convert roll and pitch from rad to deg
+            self.sea_pressure = self.pressure * 10 - 10.1325 # convert pressure to sea pressure in dbar for GSW
+            self.cond = self.cond * 10 # convert cond from s/m to mS/cm for GSW
 
-        # Uncomment to print out available sci and eng variables
-        # print("we the following science parameters:")
-        # for i,p in enumerate(dbd.parameterNames['sci']):
-        #     print("%2d: %s"%(i,p))
-        # print("\n and engineering paramters:")
-        # for i,p in enumerate(dbd.parameterNames['eng']):
-        #     print("%2d: %s"%(i,p))
+            # Uncomment to print out available sci and eng variables
+            # print("we the following science parameters:")
+            # for i,p in enumerate(dbd.parameterNames['sci']):
+            #     print("%2d: %s"%(i,p))
+            # print("\n and engineering paramters:")
+            # for i,p in enumerate(dbd.parameterNames['eng']):
+            #     print("%2d: %s"%(i,p))
 
-        dbd.close()
-        logging.info("Binary files successfully read in.")
+            dbd.close()
+            logging.info("Binary files successfully read in.")
+        except dbdreader.DBD_ERROR_NO_DATA as e:
+            logging.error(str(e))
+            self.sendNoData(e)
 
     def makeDf(self): 
         logging.info("Making pandas dataframe.")
@@ -809,7 +811,8 @@ class gliderData:
 
 
 class doEmail:
-    def __init__(self, image_dir, csv_dir, glider, date, yos, yos_tot, dive_start, dive_end, dep_start, dep_end):
+    def __init__(self, image_dir, csv_dir, glider, date, yos, yos_tot, dive_start, dive_end, dep_start, dep_end, msg=None):
+        self.msg = str(msg)
         self.image_dir = image_dir
         self.csv_dir = csv_dir
         self.glider_name = glider
@@ -826,7 +829,7 @@ class doEmail:
             \n\nThe full deployment time series can be downloaded in the attached zipfile.\n\nPlease do not reply to this email, as caleb does not know how to write code to handle that...\
             \n\nFor data questions or concerns, please email caleb.flaim@noaa.gov and sam.woodman@noaa.gov."
         
-        self.no_data_body = "No new data was found for processing."
+        # self.no_data_body = "No new data was found for processing."
 
         self.sender_email = "esdgliders@gmail.com"
         self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"] #nmfs.swfsc.esd-gliders@noaa.gov , "jacob.partida@noaa.gov", 
@@ -840,7 +843,7 @@ class doEmail:
         message["To"] = ", ".join(self.recipiants)
         message["Subject"] = self.no_data_subject
         message["Bcc"] = "esdgliders@gmail.com"  # Recommended for mass emails
-        message.attach(MIMEText(self.no_data_body, "plain"))
+        message.attach(MIMEText(self.msg, "plain"))
 
         text = message.as_string()
         context = ssl.create_default_context()
