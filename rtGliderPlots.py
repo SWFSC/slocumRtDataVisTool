@@ -10,6 +10,7 @@ import shutil
 import argparse
 import scipy as sp
 from scipy import odr
+from scipy.signal import argrelextrema
 from sklearn.linear_model import LinearRegression
 import gsw
 import matplotlib.dates as mdates
@@ -120,7 +121,7 @@ class gliderData:
       
         self.sci_vars = ["cdom", "chlorophyl", "oxygen", "backscatter"] # List of science variables
         self.sci_colors = {"cdom":cmo.solar, "chlorophyl": cmo.algae, "oxygen":cmo.tempo, "backscatter":cmo.haline} # dictionary of colormaps to be used for listed science variables
-
+        self.list_sci_vars = ['backscatter', 'chlorophyl', 'cdom', 'oxygen','temp', 'cond','density', 'absolute_salinity', 'potential_temperature', 'sigma', 'conservative_temperature']
         # Dictionary used to store strings of processed data stats and 
         # parameters to display the string (e.g., color, condasize)
         self.data_strings = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
@@ -130,7 +131,7 @@ class gliderData:
         self._data = {"dive":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]},
                       "climb":{"w":[], "pitch":[], "roll":[], "dt":[], "amphr":[], "vac":[]}} # {"key" : {"sub_key" : [list of values, e.g., roll]}}
         # Dictionary of units for plotting purposes
-        self.units = {"w":'m/s', "pitch":'deg', "roll":'deg', "dt":'hrs', "amphr":'Ahr', "vac":'inHg', "cdom":"nanometers", "chlorophyl":"µmol•$m^{-2}$", "oxygen":"mL•$L^{-1}$", "backscatter":"$m^{-1}$"} # 
+        self.units = {"w":'m/s', "pitch":'deg', "roll":'deg', "dt":'hrs', "amphr":'Ahr', "vac":'inHg', "cdom":"ppb", "chlorophyl":"µg•$L^{-l}$", "oxygen":"mL•$L^{-1}$", "backscatter":"$m^{-1}$"} # 
         # Dictionary to store acceptable ranges fpr flight parameters
         self.acceptable_ranges = {"dive":{"w":[-0.08, -0.20], "pitch":[-20, -29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]},
                                   "climb":{"w":[0.08, 0.20], "pitch":[20, 29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]}}
@@ -257,44 +258,98 @@ class gliderData:
         self.df = self.df.query("cond > 0 & cond < 60")
         self.df = self.df.query("temp > -1 & temp < 100")
         self.df = self.df.query("sea_pressure > -1")
+        # self.df = self.df.query("chlorophyl > 0")
+        self.df.loc[self.df['chlorophyl'] < 0] = np.NaN
         self.df.reindex()
         logging.info("Dataframe made successfully!")
 
-    def getProfiles(self):
-        logging.info("Looking for profiles.")
-        # Code taken and modified from pyglider to work with pandas
-        min_dp=10.0
-        inversion=3.
-        filt_length=7
-        min_nsamples=14
+    def getProfiles(self, min_dp=10.0, filt_time=100, profile_min_time=300):
+        # code in this function was modified from pyglider to work with pandas dataframe
+        
+        if 'pressure' not in self.df.columns:
+            logging.warning('No "pressure" variable in the data set; not searching for profiles')
 
-        profile = self.df.pressure.values * np.nan
-        direction = self.df.pressure.values * np.nan
+        profile = self.df.pressure.values * 0
+        direction = self.df.pressure.values * 0
         pronum = 1
-        lastpronum = 0
 
-        good = np.where(~np.isnan(self.df.pressure.values))[0]
-        p = np.convolve(self.df.pressure.values[good],
-                        np.ones(filt_length) / filt_length, 'same')
-        dpall = np.diff(p)
-        inflect = np.where(dpall[:-1] * dpall[1:] < 0)[0]
-        for n, i in enumerate(inflect[:-1]):
-            try:
-                nprofile = inflect[n+1] - inflect[n]
-                inds = np.arange(good[inflect[n]], good[inflect[n+1]]+1) + 1
-                dp = np.diff(self.df.pressure[inds[[-1, 0]]])
+        good = np.where(np.isfinite(self.df.pressure))[0]
+        dt = float(np.median(
+            np.diff(self.df.time.values[good[:200000]]).astype(np.float64)) * 1e-9)
+        logging.info(f'dt, {dt}')
+        filt_length = int(filt_time / dt)
 
-                if ((nprofile >= min_nsamples) and (np.abs(dp) > 10)):
-                    direction[inds] = np.sign(dp)
-                    profile[inds] = pronum
-                    lastpronum = pronum
-                    pronum += 1
-                else:
-                    profile[good[inflect[n]]:good[inflect[n+1]]] = lastpronum + 0.5
+        min_nsamples = int(profile_min_time / dt)
+        logging.info('Filt Len  %d, dt %f, min_n %d', filt_length, dt, min_nsamples)
+        if filt_length > 1:
+            p = np.convolve(self.df.pressure.values[good],
+                            np.ones(filt_length) / filt_length, 'same')
+        else:
+            p = self.df.pressure.values[good]
+        decim = int(filt_length / 3)
+        if decim < 2:
+            decim = 2
+        # why?  because argrelextrema doesn't like repeated values, so smooth
+        # then decimate to get fewer values:
+        pp = p[::decim]
+        maxs = argrelextrema(pp, np.greater)[0]
+        mins = argrelextrema(pp, np.less)[0]
+        mins = good[mins * decim]
+        maxs = good[maxs * decim]
+        if mins[0] > maxs[0]:
+            mins = np.concatenate(([0], mins))
+        if mins[-1] < maxs[-1]:
+            mins = np.concatenate((mins, good[[-1]]))
 
-            except KeyError:
-                continue
+        logging.debug(f'mins: {len(mins)} {mins} , maxs: {len(maxs)} {maxs}')
 
+        pronum = 0
+        p = self.df.pressure.to_numpy()
+        nmin = 0
+        nmax = 0
+
+        _num_iters = 0
+        while (nmin < len(mins)) and (nmax < len(maxs)):
+            _num_iters += 0
+            # try:
+            nmax = np.where(maxs > mins[nmin])[0]
+            if len(nmax) >= 1:
+                nmax = nmax[0]
+            else:
+                break
+            logging.debug(nmax)
+            ins = range(int(mins[nmin]), int(maxs[nmax]+1))
+            # logging.debug(f'{pronum}, {ins}, {len(p)}, {mins[nmin]}, {maxs[nmax]}')
+            # logging.debug(f'Down, {ins}, {p[ins[0]].values},{p[ins[-1]].values}')
+            logging.debug(f'{pronum}, {ins}, {len(p)}, {mins[nmin]}, {maxs[nmax]}')
+            logging.debug(f'Down, {ins}, {p[ins[0]]},{p[ins[-1]]}')
+            if ((len(ins) > min_nsamples) and
+                    (np.nanmax(p[ins]) - np.nanmin(p[ins]) > min_dp)):
+                profile[ins] = pronum
+                direction[ins] = +1
+                pronum += 1
+            nmin = np.where(mins > maxs[nmax])[0]
+            if len(nmin) >= 1:
+                nmin = nmin[0]
+            else:
+                break
+            ins = range(maxs[nmax], mins[nmin])
+            # logging.debug(f'{pronum}, {ins}, {len(p)}, {mins[nmin]}, {maxs[nmax]}')
+            # logging.debug(f'Up, {ins}, {p[ins[0]].values}, {p[ins[-1]].values}')
+            logging.debug(f'{pronum}, {ins}, {len(p)}, {mins[nmin]}, {maxs[nmax]}')
+            logging.debug(f'Up, {ins}, {p[ins[0]]}, {p[ins[-1]]}')
+            if ((len(ins) > min_nsamples) and
+                    (np.nanmax(p[ins]) - np.nanmin(p[ins]) > min_dp)):
+                # up
+                profile[ins] = pronum
+                direction[ins] = -1
+                pronum += 1
+            
+            # except KeyError:
+            #     print("errored")
+            #     pass
+
+        logging.info(f"Found profiles in {_num_iters} iterations.")
         self.df['profile_index'] = profile
         self.df['profile_direction'] = direction
 
@@ -307,7 +362,7 @@ class gliderData:
             self.n_yos_tot = np.max(self.df.profile_index)
             self.dep_start = datetime.strftime(np.min(self.df.time), "%Y-%b-%d %H:%M")
             self.dep_end = datetime.strftime(np.max(self.df.time), "%Y-%b-%d %H:%M")
-
+        
     def calcDensitySA(self):
         logging.info("Calculating SA, rho, CT.")
         # calculate water density
@@ -329,29 +384,14 @@ class gliderData:
         self.df = self.df.query('conservative_temperature > 0 & conservative_temperature < 50')
         logging.info("SA, rhp, CT added to data frame.")
 
-    def calcW(self):
-        logging.info("Calculating vertical speed.")
-        prof_inds = self.df.profile_index.values
-        t = np.float64(self.df.time.values)
+    def calcW(self, t_sub, d_sub, val):
+        model = LinearRegression()
+        model.fit(t_sub, d_sub)
+        d_pred = model.predict(t_sub)
+        w = -1*model.coef_[0][0]*np.power(10,9) # convert to m/s from m/ns
 
-        for val in np.unique(prof_inds)[0:len(np.unique(prof_inds))-1]:
-            if val != np.float64('nan'):
-                start = np.where(prof_inds==val)[0][0]
-                end = np.where(prof_inds==val)[0][-1]
-
-                d_sub = self.df.depth_m.values[start:end]
-                d_filt = d_sub > 1
-                d_sub = d_sub[d_filt]
-                d_sub = d_sub.reshape(-1,1)
-
-                t_sub = t[start:start+len(d_sub)].reshape(-1,1)
-
-                model = LinearRegression()
-                model.fit(t_sub, d_sub)
-                d_pred = model.predict(t_sub)
-                w = -1*model.coef_[0][0]*np.power(10,9) # convert to m/s from m/ns
-                logging.info(f"Vertical speed for profile{val} is {w} m/s.")
-        logging.info("Vertical velocities calculated successfuly.")
+        logging.info(f"Vertical speed for profile{val} is {w} m/s.")
+        return w
 
     def makeDataDisplayStrings(self):
         logging.info("Making display strings.")
@@ -600,7 +640,8 @@ class gliderData:
         # plt.show()
     
     def makeSegmentedDf(self):
-        logging.info("Segmenting datagrame.")
+        logging.info("Segmenting dataframe.")
+        logging.info("Calculating vertical speed.")
         prof_inds = self.df.profile_index.values
         depth = self.df.depth_m.values
         t = np.float64(self.df.time.values)
@@ -634,11 +675,11 @@ class gliderData:
                 _vac = vac[start:start+len(d_sub)]
                 vac_mean = np.mean(_vac)
 
-                model = LinearRegression()
-                model.fit(t_sub, d_sub)
-                d_pred = model.predict(t_sub)
-                w = -1*model.coef_[0][0]*np.power(10,9) # convert to m/s from m/ns
-
+                # model = LinearRegression()
+                # model.fit(t_sub, d_sub)
+                # d_pred = model.predict(t_sub)
+                # w = -1*model.coef_[0][0]*np.power(10,9) # convert to m/s from m/ns
+                w = self.calcW(t_sub, d_sub, val)
                 p_sub_raw = pitch[start:end]
                 _vars = {"w":w, "pitch":p_mean, "roll":r_mean, "dt":dt, "amphr":da, "vac": vac_mean}
 
@@ -653,10 +694,12 @@ class gliderData:
 
                 for sub_key in sub_keys:
                     self._data[parent_key][sub_key].append(float(_vars[sub_key]))
-
+                    
+        logging.info("Vertical velocities calculated successfuly.")
         logging.info("Filtering dataframe for climbs")
         self.df["dive_bool"] = dive_bool
-        self.df = self.df.query("dive_bool > 0")
+        # self.df = self.df.query("dive_bool > 0")
+        self.df.loc[self.df['dive_bool'] < 0, self.list_sci_vars] = np.NaN
         logging.info("Climbs removed.")
         # self.df = self.df.query("cond > 0")
     
@@ -704,7 +747,7 @@ class gliderData:
         self.makeDf()
         self.getProfiles()
         self.calcDensitySA()
-        self.calcW()
+        # self.calcW()
         self.makeSegmentedDf()
         self.makeDataDisplayStrings()
         self.makeFlightPanel()
@@ -785,7 +828,7 @@ class gliderData:
             self.moveDataFilesToProcessed()
             self.getProfiles()
             self.calcDensitySA()
-            self.calcW()
+            # self.calcW()
             self.makeSegmentedDf()
             self.makeDataDisplayStrings()
             self.makeFlightPanel()
