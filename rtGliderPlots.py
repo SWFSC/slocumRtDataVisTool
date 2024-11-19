@@ -258,8 +258,9 @@ class gliderData:
         self.df = self.df.query("cond > 0 & cond < 60")
         self.df = self.df.query("temp > -1 & temp < 100")
         self.df = self.df.query("sea_pressure > -1")
-        # self.df = self.df.query("chlorophyl > 0")
-        self.df.loc[self.df['chlorophyl'] < 0] = np.NaN
+        self.df = self.df.query("chlorophyl > 0")
+        # self.df.loc[self.df['chlorophyl'] == 0] = np.NaN
+        # self.df.loc[self.df['oxygen'] == 0] = np.NaN
         self.df.reindex()
         logging.info("Dataframe made successfully!")
 
@@ -870,7 +871,7 @@ class doEmail:
         self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"] #nmfs.swfsc.esd-gliders@noaa.gov , "jacob.partida@noaa.gov", 
                         #    "jen.walsh@noaa.gov", "anthony.cossio@noaa.gov", "christian.reiss@noaa.gov",
                         #    "eric.bjorkstedt@noaa.gov"
-        self.password = # to fill in on VM  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
+        self.password = "dyzw kqlu daop oemy"# to fill in on VM  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
     
     def sendNoData(self):
         message = MIMEMultipart()
