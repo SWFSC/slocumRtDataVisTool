@@ -527,11 +527,8 @@ class gliderData:
             gs = fig.add_gridspec(6, 7)
             ax1 = fig.add_subplot(gs[0:, 0:3])
             ax2 = fig.add_subplot(gs[0:3, 3:])
-            # ax4 = fig.add_subplot(gs[4:, 3:])
 
             ax2.invert_yaxis()
-            # ax3.invert_yaxis()
-            # ax4.invert_yaxis()
 
             ax1.set_xlabel("Salinity [$g \\bullet kg^{-1}$]", fontsize=14)
             ax1.set_ylabel("Temperature [°C]", fontsize=14)
@@ -541,7 +538,6 @@ class gliderData:
             np.ceil(data.df.absolute_salinity.max()+0.5))
             t_lims = (np.floor(data.df.conservative_temperature.min()-0.5),
                     np.ceil(data.df.conservative_temperature.max()+0.5))
-            # print(t_lims)
             S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
             T = np.arange(t_lims[0],t_lims[1]+0.1,0.1)
             Tg, Sg = np.meshgrid(T,S)
@@ -743,12 +739,10 @@ class gliderData:
 
     def makeFullDeploymentPlots(self):
         logging.info("Making full deployment plots.")
-        # self.checkGliderDataDir()
         self.readRaw()
         self.makeDf()
         self.getProfiles()
         self.calcDensitySA()
-        # self.calcW()
         self.makeSegmentedDf()
         self.makeDataDisplayStrings()
         self.makeFlightPanel()
@@ -823,13 +817,11 @@ class gliderData:
         self.checkNewData()
         if self.new_data_bool:
             logging.info("New data found: making plots.")
-            # self.getWorkingDirs() # Not used atm
             self.readRaw()
             self.makeDf()
             self.moveDataFilesToProcessed()
             self.getProfiles()
             self.calcDensitySA()
-            # self.calcW()
             self.makeSegmentedDf()
             self.makeDataDisplayStrings()
             self.makeFlightPanel()
@@ -871,7 +863,7 @@ class doEmail:
         self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"] #nmfs.swfsc.esd-gliders@noaa.gov , "jacob.partida@noaa.gov", 
                         #    "jen.walsh@noaa.gov", "anthony.cossio@noaa.gov", "christian.reiss@noaa.gov",
                         #    "eric.bjorkstedt@noaa.gov"
-        self.password = "dyzw kqlu daop oemy"# to fill in on VM  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
+        self.password = # to fill in on VM  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
     
     def sendNoData(self):
         message = MIMEMultipart()
