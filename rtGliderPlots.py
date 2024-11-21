@@ -69,6 +69,7 @@ class gliderData:
         self.project = args.project
         self.max_amphrs = args.amphours
         self.new_data_bool = False
+        self.year = args.year
 
         # Data path info
         gcp_bucket_dep_date = self.deployment.split("-")[1][0:4]
@@ -77,8 +78,8 @@ class gliderData:
         self.data_dir = f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/" # set data dir specific to glider
         self.data_parent_dir = "/opt/slocumRtDataVisTool/data/" # set parent dir for data folders (any glider)
         # self.cache_dir = "/opt/standard-glider-files/Cache/" # set directoy path for cache
-        self.cache_dir = "/mnt/gcs/deployments/cache/" # set directoy path for cache
-        self.gcp_mnt_bucket_dir = f"/mnt/gcs/deployments/{self.project}/{gcp_bucket_dep_date}/{self.deployment}/data/binary/rt/"
+        self.cache_dir = "/mnt/gcs/deployment/cache/" # set directoy path for cache
+        self.gcp_mnt_bucket_dir = f"/mnt/gcs/deployment/{self.project}/{self.year}/{self.deployment}/data/binary/rt/"
         self.image_dir = f"/opt/slocumRtDataVisTool/images/{self.glider}/"
         self.image_parent_dir = f"/opt/slocumRtDataVisTool/images/"
         self.date = ""
@@ -256,11 +257,12 @@ class gliderData:
         logging.info("Filtering bogus values.")
         # NOTE: should do somehting here to check for gaps in the data to avoid 
         self.df = self.df.query("cond > 0 & cond < 60")
-        self.df = self.df.query("temp > -1 & temp < 100")
+        self.df = self.df.query("temp > -2 & temp < 100")
         self.df = self.df.query("sea_pressure > -1")
         self.df = self.df.query("chlorophyl > 0")
         # self.df.loc[self.df['chlorophyl'] == 0] = np.NaN
         # self.df.loc[self.df['oxygen'] == 0] = np.NaN
+        self.df = self.df.dropna()
         self.df.reindex()
         logging.info("Dataframe made successfully!")
 
@@ -382,7 +384,10 @@ class gliderData:
 
         logging.info("Filtering bogus values.")
         self.df = self.df.query('absolute_salinity > 0 & absolute_salinity < 60')
-        self.df = self.df.query('conservative_temperature > 0 & conservative_temperature < 50')
+        self.df = self.df.query('conservative_temperature > -2 & conservative_temperature < 50')
+        self.df = self.df.dropna()
+        #nan_num = np.float64('nan')
+        #self.df = self.df.query('(conservative_temperature != @nan_num) & (absolute_salinity != @nan_num)')
         logging.info("SA, rhp, CT added to data frame.")
 
     def calcW(self, t_sub, d_sub, val):
@@ -400,32 +405,33 @@ class gliderData:
         for key in keys:
             sub_keys = self.data_strings[key].keys()
             for sub_key in sub_keys:
-                var_vals = self._data[key][sub_key]
-                var_mean = np.nanmean(self._data[key][sub_key])
-                var_max = np.max(self._data[key][sub_key])
-                var_min = np.min(self._data[key][sub_key])
+                if len(self._data[key][sub_key])>2:
+                    var_vals = self._data[key][sub_key]
+                    var_mean = np.nanmean(self._data[key][sub_key])
+                    var_max = np.max(self._data[key][sub_key])
+                    var_min = np.min(self._data[key][sub_key])
 
-                low_thresh = np.min(self.acceptable_ranges[key][sub_key])
-                high_thresh = np.max(self.acceptable_ranges[key][sub_key])
-                if var_mean > low_thresh and var_mean < high_thresh:
-                    self.data_strings[key][sub_key].append(f"{sub_key}: {np.nanmean(self._data[key][sub_key]):0.3f} {self.units[sub_key]}")
-                    self.data_strings[key][sub_key].append(14)
-                    self.data_strings[key][sub_key].append('k')
-                    self.data_strings[key][sub_key].append('normal')
-                    self.data_strings[key][sub_key].append('normal')
+                    low_thresh = np.min(self.acceptable_ranges[key][sub_key])
+                    high_thresh = np.max(self.acceptable_ranges[key][sub_key])
+                    if var_mean > low_thresh and var_mean < high_thresh:
+                        self.data_strings[key][sub_key].append(f"{sub_key}: {np.nanmean(self._data[key][sub_key]):0.3f} {self.units[sub_key]}")
+                        self.data_strings[key][sub_key].append(14)
+                        self.data_strings[key][sub_key].append('k')
+                        self.data_strings[key][sub_key].append('normal')
+                        self.data_strings[key][sub_key].append('normal')
 
-                else:
-                    self.data_strings[key][sub_key].append(f"{sub_key}: {np.nanmean(self._data[key][sub_key]):0.3f} {self.units[sub_key]}")
-                    self.data_strings[key][sub_key].append(14)
-                    self.data_strings[key][sub_key].append('r')
-                    self.data_strings[key][sub_key].append('italic')
-                    self.data_strings[key][sub_key].append('bold')
-                
-                if var_min < low_thresh or var_max > high_thresh:
-                    if key == "dive":
-                        self.problem_dives.append(f"{self._data[key][sub_key].index(var_max) + 1}")
                     else:
-                        self.problem_dives.append(f"{self._data[key][sub_key].index(var_max) + 2}")
+                        self.data_strings[key][sub_key].append(f"{sub_key}: {np.nanmean(self._data[key][sub_key]):0.3f} {self.units[sub_key]}")
+                        self.data_strings[key][sub_key].append(14)
+                        self.data_strings[key][sub_key].append('r')
+                        self.data_strings[key][sub_key].append('italic')
+                        self.data_strings[key][sub_key].append('bold')
+                
+                    if var_min < low_thresh or var_max > high_thresh:
+                        if key == "dive":
+                            self.problem_dives.append(f"{self._data[key][sub_key].index(var_max) + 1}")
+                        else:
+                            self.problem_dives.append(f"{self._data[key][sub_key].index(var_max) + 2}")
         logging.info("Display strings finished successfully.")
 
     def makeFlightPanel(self): # needs to be pointed to a save directory
@@ -521,27 +527,60 @@ class gliderData:
     def makeSciTSPanel(self):
         logging.info("Makinf TS plots.")
         # code adapted from Jacob Partida
+
+        #print(self.df.absolute_salinity.min)
+        #print(self.df.absolute_salinity.max)
+        #print(self.df.conservative_temperature.min)
+        #print(self.df.conservative_temperature.max)
+        #for sal in self.df.absolute_salinity.values: print(type(sal), sal)
+        #for temp in self.df.conservative_temperature.values: print(type(temp), temp)
+        #good_sal = np.where(np.isfinite(self.df.absolute_salinity))[0]
+        #s = self.df.absolute_salinity.values[good_sal]
+        s_lims = (np.floor(np.min(self.df.absolute_salinity.dropna())-0.5),
+        np.ceil(np.max(self.df.absolute_salinity.dropna())+0.5))
+        logging.info(f"s_lims: {s_lims}")
+
+        t_lims = (np.floor(np.min(self.df.conservative_temperature.dropna())-0.5),
+                    np.ceil(np.max(self.df.conservative_temperature.dropna())+0.5))
+        logging.info(f"t_lims: {t_lims}")
+        # print(t_lims)
+        S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
+        T = np.arange(t_lims[0],t_lims[1]+0.1,0.1)
+        Tg, Sg = np.meshgrid(T,S)
+        sigma = gsw.sigma0(Sg,Tg)
+
         for var in self.sci_vars:
             logging.info(f"Making {var} TS plot")
             fig = plt.figure(constrained_layout = True, figsize=(15, 8.5))
             gs = fig.add_gridspec(6, 7)
             ax1 = fig.add_subplot(gs[0:, 0:3])
             ax2 = fig.add_subplot(gs[0:3, 3:])
+            # ax4 = fig.add_subplot(gs[4:, 3:])
 
             ax2.invert_yaxis()
+            # ax3.invert_yaxis()
+            # ax4.invert_yaxis()
 
             ax1.set_xlabel("Salinity [$g \\bullet kg^{-1}$]", fontsize=14)
             ax1.set_ylabel("Temperature [°C]", fontsize=14)
+            
+            #print(self.df.absolute_salinity)
+            #print(self.df.conservative_temperature)
 
+            #good_sal = np.where(np.isfinite(self.df.absolute_salinity))[0]
+            #s = self.df.absolute_salinity.values[good_sal]
+            #s_lims = (np.floor(np.nanmin(self.df.absolute_salinity)-0.5),
+            #np.ceil(np.nanmax(self.df.absolute_salinity)+0.5))
+            #logging.info(f"s_lims: {s_lims}")
 
-            s_lims = (np.floor(data.df.absolute_salinity.min()-0.5),
-            np.ceil(data.df.absolute_salinity.max()+0.5))
-            t_lims = (np.floor(data.df.conservative_temperature.min()-0.5),
-                    np.ceil(data.df.conservative_temperature.max()+0.5))
-            S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
-            T = np.arange(t_lims[0],t_lims[1]+0.1,0.1)
-            Tg, Sg = np.meshgrid(T,S)
-            sigma = gsw.sigma0(Sg,Tg)
+            #t_lims = (np.floor(np.nanmin(self.df.conservative_temperature)-0.5),
+            #        np.ceil(np.nanmax(self.df.conservative_temperature)+0.5))
+            #logging.info(f"t_lims: {t_lims}")
+            # print(t_lims)
+            #S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
+            #T = np.arange(t_lims[0],t_lims[1]+0.1,0.1)
+            #Tg, Sg = np.meshgrid(T,S)
+            #sigma = gsw.sigma0(Sg,Tg)
 
             c0 = ax1.contour(Sg, Tg, sigma, colors='grey', zorder=1)
             c0l = plt.clabel(c0, colors='k', fontsize=9)
@@ -739,16 +778,18 @@ class gliderData:
 
     def makeFullDeploymentPlots(self):
         logging.info("Making full deployment plots.")
+        # self.checkGliderDataDir()
         self.readRaw()
         self.makeDf()
         self.getProfiles()
         self.calcDensitySA()
+        # self.calcW()
         self.makeSegmentedDf()
         self.makeDataDisplayStrings()
         self.makeFlightPanel()
         logging.info("Filtering bogus values.")
-        self.df = self.df.query('absolute_salinity > 0 & absolute_salinity < 60')
-        self.df = self.df.query('conservative_temperature > 0 & conservative_temperature < 50')
+        #self.df = self.df.query('absolute_salinity > 0 & absolute_salinity < 60')
+        #self.df = self.df.query('conservative_temperature > 0 & conservative_temperature < 50')
         self.makeSciTSPanel()
         self.makeSciDpPanel()
         self.saveDataCsv()
@@ -817,11 +858,13 @@ class gliderData:
         self.checkNewData()
         if self.new_data_bool:
             logging.info("New data found: making plots.")
+            # self.getWorkingDirs() # Not used atm
             self.readRaw()
             self.makeDf()
             self.moveDataFilesToProcessed()
             self.getProfiles()
             self.calcDensitySA()
+            # self.calcW()
             self.makeSegmentedDf()
             self.makeDataDisplayStrings()
             self.makeFlightPanel()
@@ -961,6 +1004,10 @@ if __name__ == "__main__":
         help='File to which to write logs',
         default='')
 
+    arg_parser.add_argument('year',
+        type=str,
+        help='e.g., year the glider was deployed.')
+
     arg_parser.add_argument('amphours',
         type=int,
         help='e.g., 300 Ahrs, 800 Ahrs')
@@ -975,4 +1022,4 @@ if __name__ == "__main__":
 # [] Need to check for existing gliderName directory in /data/ --> if the directory exists, do nothing. If the directory doesn't exist, make the directory and add "new_data" and "processed" subdirectories. 
 # [] Need to change the data file paths to work with f"opt/slocumRtDataVisTooldata/{args.glider}/new_data | processed" where the glider folder is determined by the shell script call to run rtGliderPlots.py.
 # [] Upon mounting the GCP bucket, the code needs to check what files in the bucket it has already processed and which are the new files --> during a deployment, already processed files will be stored on the VM in /opt/slocumRtDataVisTool/data/gliderName/procressed. The code will compare the lists of files in the bucket and locally and copy the remaining files to /opt/slocumRtDataVisTool/data/gliderName/new_data to be processed.
-# [] The code should now run perfectly with no issues whatsoever. 
+# [] The code should now run perfectly with no issues whatsoever.
