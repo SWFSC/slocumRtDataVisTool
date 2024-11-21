@@ -4,6 +4,7 @@ import pandas as pd
 import xarray as xr 
 import dbdreader
 import matplotlib.pyplot as plt
+from matplotlib import colormaps 
 import os
 import sys
 import shutil
@@ -121,7 +122,7 @@ class gliderData:
                                  "profile3":["chlorophyl"]} # Dictionary to be looped thru to make depth profiles of scienec vars
       
         self.sci_vars = ["cdom", "chlorophyl", "oxygen", "backscatter"] # List of science variables
-        self.sci_colors = {"cdom":cmo.solar, "chlorophyl": cmo.algae, "oxygen":cmo.tempo, "backscatter":cmo.haline} # dictionary of colormaps to be used for listed science variables
+        self.sci_colors = {"cdom":cmo.solar, "chlorophyl": cmo.algae, "oxygen":cmo.tempo, "backscatter":colormaps['terrain']} # dictionary of colormaps to be used for listed science variables
         self.list_sci_vars = ['backscatter', 'chlorophyl', 'cdom', 'oxygen','temp', 'cond','density', 'absolute_salinity', 'potential_temperature', 'sigma', 'conservative_temperature']
         # Dictionary used to store strings of processed data stats and 
         # parameters to display the string (e.g., color, condasize)
@@ -262,11 +263,11 @@ class gliderData:
         self.df = self.df.query("chlorophyl > 0")
         # self.df.loc[self.df['chlorophyl'] == 0] = np.NaN
         # self.df.loc[self.df['oxygen'] == 0] = np.NaN
-        self.df = self.df.dropna()
+        # self.df = self.df.dropna()
         self.df.reindex()
         logging.info("Dataframe made successfully!")
 
-    def getProfiles(self, min_dp=10.0, filt_time=100, profile_min_time=300):
+    def getProfiles(self, min_dp=5.0, filt_time=150, profile_min_time=300):
         # code in this function was modified from pyglider to work with pandas dataframe
         
         if 'pressure' not in self.df.columns:
@@ -385,7 +386,7 @@ class gliderData:
         logging.info("Filtering bogus values.")
         self.df = self.df.query('absolute_salinity > 0 & absolute_salinity < 60')
         self.df = self.df.query('conservative_temperature > -2 & conservative_temperature < 50')
-        self.df = self.df.dropna()
+        # self.df = self.df.dropna()
         #nan_num = np.float64('nan')
         #self.df = self.df.query('(conservative_temperature != @nan_num) & (absolute_salinity != @nan_num)')
         logging.info("SA, rhp, CT added to data frame.")
@@ -527,21 +528,12 @@ class gliderData:
     def makeSciTSPanel(self):
         logging.info("Makinf TS plots.")
         # code adapted from Jacob Partida
-
-        #print(self.df.absolute_salinity.min)
-        #print(self.df.absolute_salinity.max)
-        #print(self.df.conservative_temperature.min)
-        #print(self.df.conservative_temperature.max)
-        #for sal in self.df.absolute_salinity.values: print(type(sal), sal)
-        #for temp in self.df.conservative_temperature.values: print(type(temp), temp)
-        #good_sal = np.where(np.isfinite(self.df.absolute_salinity))[0]
-        #s = self.df.absolute_salinity.values[good_sal]
-        s_lims = (np.floor(np.min(self.df.absolute_salinity.dropna())-0.5),
-        np.ceil(np.max(self.df.absolute_salinity.dropna())+0.5))
+        s_lims = (np.floor(np.min(self.df.absolute_salinity)-0.5),
+        np.ceil(np.max(self.df.absolute_salinity)+0.5))
         logging.info(f"s_lims: {s_lims}")
 
-        t_lims = (np.floor(np.min(self.df.conservative_temperature.dropna())-0.5),
-                    np.ceil(np.max(self.df.conservative_temperature.dropna())+0.5))
+        t_lims = (np.floor(np.min(self.df.conservative_temperature)-0.5),
+                    np.ceil(np.max(self.df.conservative_temperature)+0.5))
         logging.info(f"t_lims: {t_lims}")
         # print(t_lims)
         S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
@@ -564,23 +556,6 @@ class gliderData:
             ax1.set_xlabel("Salinity [$g \\bullet kg^{-1}$]", fontsize=14)
             ax1.set_ylabel("Temperature [°C]", fontsize=14)
             
-            #print(self.df.absolute_salinity)
-            #print(self.df.conservative_temperature)
-
-            #good_sal = np.where(np.isfinite(self.df.absolute_salinity))[0]
-            #s = self.df.absolute_salinity.values[good_sal]
-            #s_lims = (np.floor(np.nanmin(self.df.absolute_salinity)-0.5),
-            #np.ceil(np.nanmax(self.df.absolute_salinity)+0.5))
-            #logging.info(f"s_lims: {s_lims}")
-
-            #t_lims = (np.floor(np.nanmin(self.df.conservative_temperature)-0.5),
-            #        np.ceil(np.nanmax(self.df.conservative_temperature)+0.5))
-            #logging.info(f"t_lims: {t_lims}")
-            # print(t_lims)
-            #S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
-            #T = np.arange(t_lims[0],t_lims[1]+0.1,0.1)
-            #Tg, Sg = np.meshgrid(T,S)
-            #sigma = gsw.sigma0(Sg,Tg)
 
             c0 = ax1.contour(Sg, Tg, sigma, colors='grey', zorder=1)
             c0l = plt.clabel(c0, colors='k', fontsize=9)
@@ -736,6 +711,7 @@ class gliderData:
         self.df["dive_bool"] = dive_bool
         # self.df = self.df.query("dive_bool > 0")
         self.df.loc[self.df['dive_bool'] < 0, self.list_sci_vars] = np.NaN
+        self.df.loc[self.df['profile_direction'] < 0, self.list_sci_vars] = np.NaN
         logging.info("Climbs removed.")
         # self.df = self.df.query("cond > 0")
     
@@ -894,24 +870,27 @@ class doEmail:
         self.subject = f"{self.glider_name} science plots on {self.date}"
         self.no_data_subject = f"New no data scraped for {self.glider_name}"
 
-        self.body = f"This is an automated email and is a prototype for the automated webscrapping application.\nThese data were scraped from SFMC on {self.date} for the glider named \"{self.glider_name}\".\
+        self.body = f"This is an automated email and is a prototype for the real-time data visualization application.\nThese data were scraped from SFMC on {self.date} for the glider named \"{self.glider_name}\".\
             \n\n{self.glider_name} performed {self.yos+1:0.0f} half-yos from {dive_start} to {dive_end} prior to the last scrape.\
             \n{self.glider_name} has performed a total of {self.yos_total+1:0.0f} from {dep_start} to {dep_end}.\
-            \n\nThe full deployment time series can be downloaded in the attached zipfile.\n\nPlease do not reply to this email, as caleb does not know how to write code to handle that...\
-            \n\nFor data questions or concerns, please email caleb.flaim@noaa.gov and sam.woodman@noaa.gov."
+            \n\nThe full deployment time series images can be downloaded in the attached zipfile.\nCSV data of the most recent scrape and full timeseries can be downloaded from the csv.zip file.\
+            \nPlease note that the data have not been quality checked and have only been filtered for blatantly wrong values.\
+            \n\nPlease do not reply to this email, as caleb does not know how to write code to handle that...\
+            \n\nFor data questions/concerns/suggestions, please email caleb.flaim@noaa.gov and sam.woodman@noaa.gov."
         
         # self.no_data_body = "No new data was found for processing."
 
         self.sender_email = "esdgliders@gmail.com"
+        self.no_data_recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"]
         self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"] #nmfs.swfsc.esd-gliders@noaa.gov , "jacob.partida@noaa.gov", 
                         #    "jen.walsh@noaa.gov", "anthony.cossio@noaa.gov", "christian.reiss@noaa.gov",
                         #    "eric.bjorkstedt@noaa.gov"
-        self.password = # to fill in on VM  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
+        self.password = "dyzw kqlu daop oemy"# to fill in on VM  # access_secret_version('ggn-nmfs-usamlr-dev-7b99', 'esdgliders-email')input("Type your password and press enter:")
     
     def sendNoData(self):
         message = MIMEMultipart()
         message["From"] = self.sender_email
-        message["To"] = ", ".join(self.recipiants)
+        message["To"] = ", ".join(self.no_data_recipiants)
         message["Subject"] = self.no_data_subject
         message["Bcc"] = "esdgliders@gmail.com"  # Recommended for mass emails
         message.attach(MIMEText(self.msg, "plain"))
@@ -1006,15 +985,32 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('year',
         type=str,
-        help='e.g., year the glider was deployed.')
+        help='e.g., year the glider was recovered.')
 
     arg_parser.add_argument('amphours',
         type=int,
         help='e.g., 300 Ahrs, 800 Ahrs')
 
-    parsed_args = arg_parser.parse_args()
-    data = gliderData(parsed_args)
-    data.run()
+    try:
+        parsed_args = arg_parser.parse_args()
+        data = gliderData(parsed_args)
+        data.run()
+
+    except Exception as e:
+        if parsed_args.logfile == "":
+            logging.basicConfig(
+            format='%(asctime)s %(module)s:%(levelname)s:%(message)s [line %(lineno)d]', 
+            level=getattr(logging, parsed_args.loglevel.upper()), 
+            datefmt="%Y-%m-%d %H:%M:%S")
+        else:
+            logging.basicConfig(
+            filename=parsed_args.logfile,
+            filemode="a",
+            format='%(asctime)s %(module)s:%(levelname)s:%(message)s [line %(lineno)d]', 
+            level=getattr(logging, parsed_args.loglevel.upper()), 
+            datefmt="%Y-%m-%d %H:%M:%S")
+
+        logging.warning(e)
 
 # [x] The code needs to start by mounting the amlr-dev-#### bucket to /mnt/ using esdglider.gcs_mount_bucket()
 # [x] The code them needs to take in a variable (e.g., $DEPLOYMENT) and find the glider name using the String.split('-') function --> first element is the glider name.
