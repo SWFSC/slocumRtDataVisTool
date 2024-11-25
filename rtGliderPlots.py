@@ -237,7 +237,7 @@ class gliderData:
 
             dbd.close()
             logging.info("Binary files successfully read in.")
-        except dbdreader.DBD_ERROR_NO_DATA as e:
+        except Exception as e:
             logging.error(str(e))
             self.sendNoData(e)
 
