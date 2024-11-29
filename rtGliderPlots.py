@@ -84,6 +84,7 @@ class gliderData:
         self.gcp_mnt_bucket_dir = f"/mnt/gcs/deployment/{self.project}/{self.year}/{self.deployment}/data/binary/rt/"
         self.image_dir = f"/opt/slocumRtDataVisTool/images/{self.glider}/"
         self.image_parent_dir = f"/opt/slocumRtDataVisTool/images/"
+        self.goto_dir = self.data_parent_dir+f"{self.glider}/goto/"
         self.date = ""
         
         # Eng data defaults
@@ -160,6 +161,8 @@ class gliderData:
 
         if "new_data" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/new_data/")
+        if "goto" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
+            os.makedirs(self.goto_dir)
         if "processed" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
             os.makedirs(f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/")
         if "toSend" not in os.listdir(f"/opt/slocumRtDataVisTool/data/{self.glider}"):
@@ -548,6 +551,139 @@ class gliderData:
             logging.warning(e)
             pass
 
+    # def makeSciTSPanel(self):
+    #     try:
+    #         logging.info("Makinf TS plots.")
+    #         # code adapted from Jacob Partida
+    #         s_lims = (np.floor(np.min(self.df.absolute_salinity)-0.5),
+    #         np.ceil(np.max(self.df.absolute_salinity)+0.5))
+    #         logging.info(f"s_lims: {s_lims}")
+
+    #         t_lims = (np.floor(np.min(self.df.conservative_temperature)-0.5),
+    #                     np.ceil(np.max(self.df.conservative_temperature)+0.5))
+    #         logging.info(f"t_lims: {t_lims}")
+    #         # print(t_lims)
+    #         S = np.arange(s_lims[0],s_lims[1]+0.1,0.1)
+    #         T = np.arange(t_lims[0],t_lims[1]+0.1,0.1)
+    #         Tg, Sg = np.meshgrid(T,S)
+    #         sigma = gsw.sigma0(Sg,Tg)
+
+    #         for var in self.sci_vars:
+    #             try:
+    #                 logging.info(f"Making {var} TS plot")
+    #                 fig = plt.figure(constrained_layout = True, figsize=(15, 8.5))
+    #                 gs = fig.add_gridspec(6, 7)
+    #                 ax1 = fig.add_subplot(gs[0:, 0:3])
+    #                 ax2 = fig.add_subplot(gs[0:3, 3:])
+    #                 # ax4 = fig.add_subplot(gs[4:, 3:])
+
+    #                 ax2.invert_yaxis()
+    #                 # ax3.invert_yaxis()
+    #                 # ax4.invert_yaxis()
+
+    #                 ax1.set_xlabel("Salinity [$g \\bullet kg^{-1}$]", fontsize=14)
+    #                 ax1.set_ylabel("Temperature [°C]", fontsize=14)
+                    
+
+    #                 c0 = ax1.contour(Sg, Tg, sigma, colors='grey', zorder=1)
+    #                 c0l = plt.clabel(c0, colors='k', fontsize=9)
+
+    #                 p0 = ax1.scatter(self.df.absolute_salinity, self.df.conservative_temperature, 
+    #                                 c=self.df[var], cmap=self.sci_colors[var], s=5)
+    #                 cbar0 = fig.colorbar(p0, label=f"{var} [{self.units[var]}]", location='left')
+
+    #                 if "cat" in self.data_dir:
+    #                     ax2.scatter(self.df[var], self.df.depth_m, s=2)
+    #                     ax2.set_xlabel(f"{self.df[var]} [{self.units[var]}]", fontsize=14)
+    #                     ax2.set_ylabel("Depth [m]", fontsize=14)
+    #                 else:
+    #                     ax2.set_xlabel("Time", fontsize=14)
+    #                     ax2.set_ylabel("Depth [m]", fontsize=14)
+    #                     ax2.scatter(self.df.time, self.df.depth_m, c=self.df[var], cmap=self.sci_colors[var], s=2)
+    #                     ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+    #                     for label in ax2.get_xticklabels(which='major'):
+    #                         label.set(rotation=15, horizontalalignment='center')
+                    
+    #                 ax3 = fig.add_subplot(gs[3:, 3:])
+    #                 ax3.set_xlabel('\n\n\nLongitude [Deg]', fontsize=14)
+    #                 ax3.set_ylabel('Latitude [Deg]\n\n\n', fontsize=14)
+    #                 glider_lon, glider_lat = self.df.lon, self.df.lat
+    #                 glider_lon_min = np.min(self.df.lon)
+    #                 glider_lon_max = np.max(self.df.lon)
+    #                 glider_lat_min = np.min(self.df.lat)
+    #                 glider_lat_max = np.max(self.df.lat)
+    #                 glider_lon_mean = np.nanmean(glider_lon)
+    #                 glider_lat_mean = np.nanmean(glider_lat)
+                    
+    #                 lon_range = glider_lon_max-glider_lon_min
+    #                 lat_range = glider_lat_max-glider_lat_min
+
+    #                 if f"{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}" in os.listdir("/opt/slocumRtDataVisTool/mapPickles/"):
+    #                     with open(f"/opt/slocumRtDataVisTool/mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}", "rb") as fd:
+    #                         map = pickle.load(fd)
+    #                 else:
+    #                     map = Basemap(llcrnrlon=glider_lon_min-.05, llcrnrlat=glider_lat_min-.01,
+    #                                 urcrnrlon=glider_lon_max+.01, urcrnrlat=glider_lat_max+.05, resolution='f') # create map object
+    #                     with open(f"/opt/slocumRtDataVisTool/mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}", "wb") as fd:
+    #                         pickle.dump(map, fd, protocol=-1)
+
+    #                 map.drawcoastlines()
+    #                 map.drawcountries()
+    #                 # map.bluemarble()
+    #                 map.fillcontinents('#e0b479')
+    #                 map.drawlsmask(ocean_color = "#7bcbe3", resolution='f')
+    #                 map.drawparallels(np.linspace(glider_lat_min-0.1, glider_lat_max+0.1, 5), labels=[1,0,0,1], fmt="%0.2f")
+    #                 map.drawmeridians(np.linspace(glider_lon_min-0.1, glider_lon_max+0.1, 5), labels=[1,0,0,1], fmt="%0.3f", rotation=20)
+    #                 x, y = map(glider_lon, glider_lat)
+    #                 map.scatter(x, y, c=self.df[var], s=5, cmap=self.sci_colors[var])
+    #                 map.scatter(x.iloc[-1], y.iloc[-1], c='red', s=50, marker="*")
+
+
+    #                 axins = zoomed_inset_axes(ax3, 0.008, loc='upper left')
+    #                 axins.set_xlim(glider_lon_min-3, glider_lon_max+3)
+    #                 axins.set_ylim(glider_lat_min-3, glider_lat_max+3)
+
+    #                 if f"{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset" in os.listdir("/opt/slocumRtDataVisTool/mapPickles/"):
+    #                     with open(f"/opt/slocumRtDataVisTool/mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset", "rb") as fd:
+    #                         map_in = pickle.load(fd)
+    #                 else:
+    #                     map_in = Basemap(llcrnrlon=glider_lon_min-3, llcrnrlat=glider_lat_min-3,
+    #                                 urcrnrlon=glider_lon_max+3, urcrnrlat=glider_lat_max+3, resolution='f') # create map object
+    #                     with open(f"/opt/slocumRtDataVisTool/mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset", "wb") as fd:
+    #                         pickle.dump(map_in, fd, protocol=-1)
+
+    #                 map_in.drawcoastlines()
+    #                 map_in.drawcountries()
+    #                 map_in.fillcontinents('#e0b479')
+
+    #                 # map.drawparallels(np.linspace(glider_lat_min-3, glider_lat_max+3, 5), labels=[1,0,0,1], fmt="%0.2f")
+    #                 # map.drawmeridians(np.linspace(glider_lon_min-3, glider_lon_max+3, 5), labels=[1,0,0,1], fmt="%0.3f", rotation=20)
+    #                 # map.bluemarble()
+    #                 map_in.drawlsmask(ocean_color = "#7bcbe3", resolution='f')
+    #                 x, y = map_in(glider_lon_mean, glider_lat_mean)
+    #                 map_in.scatter(x, y, c='r', s=5)
+    #                 map_in.scatter(x, y, c='r', s=100, alpha=0.25)
+    #                 # mark_inset(ax3, axins, loc1=2, loc2=4, fc="none", ec="0.5")
+                    
+    #                 if self.data_dir == f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/":
+    #                     plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_{var}_ts_panel_full_time_series.png")
+    #                     logging.info("Saved TS plots for timeseries.")
+    #                 else:
+    #                     plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_{var}_ts_panel_{self.date}.png")
+    #                     logging.info("Saved TS plots for new data.")
+    #             except ZeroDivisionError as e:
+    #                 logging.warning(f"{var} TS plot experienced {e}. Try updating map pickles.")
+
+    #         # fig = plt.figure()
+    #         # ax = fig.add_subplot(projection='3d')   
+    #         # ax.scatter(self.df.lon, self.df.lat, self.df.depth_m, c=self.df.cdom)
+    #         # ax.invert_zaxis()
+    #         # plt.show()
+
+    #     except Exception as e:
+    #         logging.warning(e)
+    #         pass
+    
     def makeSciTSPanel(self):
         try:
             logging.info("Makinf TS plots.")
@@ -565,64 +701,69 @@ class gliderData:
             Tg, Sg = np.meshgrid(T,S)
             sigma = gsw.sigma0(Sg,Tg)
 
+            goto_parser = gotoParser(self.goto_dir+"goto_l10.ma")
+            wpts = goto_parser.parse()
+
             for var in self.sci_vars:
                 try:
                     logging.info(f"Making {var} TS plot")
-                    fig = plt.figure(constrained_layout = True, figsize=(15, 8.5))
-                    gs = fig.add_gridspec(6, 7)
-                    ax1 = fig.add_subplot(gs[0:, 0:3])
-                    ax2 = fig.add_subplot(gs[0:3, 3:])
-                    # ax4 = fig.add_subplot(gs[4:, 3:])
+                    fig = plt.figure(constrained_layout = True, figsize=(9, 15))
+                    gs = fig.add_gridspec(12, 6)
 
+                    ax0 = fig.add_subplot(gs[0:2,:]) # timeseries
+                    ax1 = fig.add_subplot(gs[2:6, 0:4]) # TS
+                    ax2 = fig.add_subplot(gs[2:6:, 4:]) # Depth profile
+
+                    ax0.invert_yaxis()
                     ax2.invert_yaxis()
-                    # ax3.invert_yaxis()
-                    # ax4.invert_yaxis()
 
                     ax1.set_xlabel("Salinity [$g \\bullet kg^{-1}$]", fontsize=14)
                     ax1.set_ylabel("Temperature [°C]", fontsize=14)
                     
+                    ax0.set_xlabel("Time", fontsize=14)
+                    ax0.set_ylabel("Depth [m]", fontsize=14)
+
+                    ax0.scatter(self.df.time, self.df.depth_m, c=self.df[var], cmap=self.sci_colors[var], s=2)
+                    ax0.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+                    for label in ax0.get_xticklabels(which='major'):
+                        label.set(rotation=15, horizontalalignment='center')
 
                     c0 = ax1.contour(Sg, Tg, sigma, colors='grey', zorder=1)
                     c0l = plt.clabel(c0, colors='k', fontsize=9)
 
                     p0 = ax1.scatter(self.df.absolute_salinity, self.df.conservative_temperature, 
                                     c=self.df[var], cmap=self.sci_colors[var], s=5)
-                    cbar0 = fig.colorbar(p0, label=f"{var} [{self.units[var]}]", location='left')
+                    cbar0 = fig.colorbar(p0, label=f"{var} [{self.units[var]}]", location='top')
 
-                    if "cat" in self.data_dir:
-                        ax2.scatter(self.df[var], self.df.depth_m, s=2)
-                        ax2.set_xlabel(f"{self.df[var]} [{self.units[var]}]", fontsize=14)
-                        ax2.set_ylabel("Depth [m]", fontsize=14)
-                    else:
-                        ax2.set_xlabel("Time", fontsize=14)
-                        ax2.set_ylabel("Depth [m]", fontsize=14)
-                        ax2.scatter(self.df.time, self.df.depth_m, c=self.df[var], cmap=self.sci_colors[var], s=2)
-                        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
-                        for label in ax2.get_xticklabels(which='major'):
-                            label.set(rotation=15, horizontalalignment='center')
-                    
-                    ax3 = fig.add_subplot(gs[3:, 3:])
+                    ax2.scatter(self.df[var], self.df.depth_m, s=2)
+                    ax2.set_xlabel(f"{var} [{self.units[var]}]", fontsize=14)
+                    ax2.set_ylabel("Depth [m]", fontsize=14)
+
+                    ax3 = fig.add_subplot(gs[7:, :]) # map
+
                     ax3.set_xlabel('\n\n\nLongitude [Deg]', fontsize=14)
                     ax3.set_ylabel('Latitude [Deg]\n\n\n', fontsize=14)
-                    glider_lon, glider_lat = self.df.lon, self.df.lat
-                    glider_lon_min = np.min(self.df.lon)
-                    glider_lon_max = np.max(self.df.lon)
-                    glider_lat_min = np.min(self.df.lat)
-                    glider_lat_max = np.max(self.df.lat)
+                    glider_lon, glider_lat = wpts.wpt_lon, wpts.wpt_lat#self.df.lon, self.df.lat
+                    glider_lon_min = np.min(wpts.wpt_lon)
+                    glider_lon_max = np.max(wpts.wpt_lon)
+                    glider_lat_min = np.min(wpts.wpt_lat)
+                    glider_lat_max = np.max(wpts.wpt_lat)
                     glider_lon_mean = np.nanmean(glider_lon)
                     glider_lat_mean = np.nanmean(glider_lat)
                     
                     lon_range = glider_lon_max-glider_lon_min
                     lat_range = glider_lat_max-glider_lat_min
-
+                    
                     if f"{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}" in os.listdir("/opt/slocumRtDataVisTool/mapPickles/"):
                         with open(f"/opt/slocumRtDataVisTool/mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}", "rb") as fd:
                             map = pickle.load(fd)
                     else:
-                        map = Basemap(llcrnrlon=glider_lon_min-.05, llcrnrlat=glider_lat_min-.01,
-                                    urcrnrlon=glider_lon_max+.01, urcrnrlat=glider_lat_max+.05, resolution='f') # create map object
+                        map = Basemap(llcrnrlon=glider_lon_min-.1, llcrnrlat=glider_lat_min-.1,
+                                    urcrnrlon=glider_lon_max+.1, urcrnrlat=glider_lat_max+.1, resolution='f', ax=ax3) # create map object
                         with open(f"/opt/slocumRtDataVisTool/mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}", "wb") as fd:
                             pickle.dump(map, fd, protocol=-1)
+                    
+                    wpt_lon, wpt_lat = map(wpts.wpt_lon, wpts.wpt_lat)
 
                     map.drawcoastlines()
                     map.drawcountries()
@@ -631,56 +772,28 @@ class gliderData:
                     map.drawlsmask(ocean_color = "#7bcbe3", resolution='f')
                     map.drawparallels(np.linspace(glider_lat_min-0.1, glider_lat_max+0.1, 5), labels=[1,0,0,1], fmt="%0.2f")
                     map.drawmeridians(np.linspace(glider_lon_min-0.1, glider_lon_max+0.1, 5), labels=[1,0,0,1], fmt="%0.3f", rotation=20)
-                    x, y = map(glider_lon, glider_lat)
-                    map.scatter(x, y, c=self.df[var], s=5, cmap=self.sci_colors[var])
-                    map.scatter(x.iloc[-1], y.iloc[-1], c='red', s=50, marker="*")
 
+                    x, y = map(self.df.lon, self.df.lat)
+                    # map.scatter(x, y, c=self.df[var], s=5, cmap=self.sci_colors[var])
+                    map.scatter(x, y, c='k', s=5, zorder=2.5)
+                    map.scatter(x.iloc[-1], y.iloc[-1], c='red', s=75, marker="*", zorder=2.5)
+                    map.plot(wpt_lon, wpt_lat, c="#808080", linestyle="--", marker='o')
 
-                    axins = zoomed_inset_axes(ax3, 0.008, loc='upper left')
-                    axins.set_xlim(glider_lon_min-3, glider_lon_max+3)
-                    axins.set_ylim(glider_lat_min-3, glider_lat_max+3)
-
-                    if f"{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset" in os.listdir("/opt/slocumRtDataVisTool/mapPickles/"):
-                        with open(f"/opt/slocumRtDataVisTool/mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset", "rb") as fd:
-                            map_in = pickle.load(fd)
-                    else:
-                        map_in = Basemap(llcrnrlon=glider_lon_min-3, llcrnrlat=glider_lat_min-3,
-                                    urcrnrlon=glider_lon_max+3, urcrnrlat=glider_lat_max+3, resolution='f') # create map object
-                        with open(f"/opt/slocumRtDataVisTool/mapPickles/{self.glider}_{glider_lon_mean:0.0f}_{glider_lat_mean:0.0f}_inset", "wb") as fd:
-                            pickle.dump(map_in, fd, protocol=-1)
-
-                    map_in.drawcoastlines()
-                    map_in.drawcountries()
-                    map_in.fillcontinents('#e0b479')
-
-                    # map.drawparallels(np.linspace(glider_lat_min-3, glider_lat_max+3, 5), labels=[1,0,0,1], fmt="%0.2f")
-                    # map.drawmeridians(np.linspace(glider_lon_min-3, glider_lon_max+3, 5), labels=[1,0,0,1], fmt="%0.3f", rotation=20)
-                    # map.bluemarble()
-                    map_in.drawlsmask(ocean_color = "#7bcbe3", resolution='f')
-                    x, y = map_in(glider_lon_mean, glider_lat_mean)
-                    map_in.scatter(x, y, c='r', s=5)
-                    map_in.scatter(x, y, c='r', s=100, alpha=0.25)
-                    # mark_inset(ax3, axins, loc1=2, loc2=4, fc="none", ec="0.5")
                     
                     if self.data_dir == f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/":
                         plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_{var}_ts_panel_full_time_series.png")
                         logging.info("Saved TS plots for timeseries.")
                     else:
                         plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_{var}_ts_panel_{self.date}.png")
-                        logging.info("Saved TS plots for new data.")
+                        logging.info(f"Saved TS plots for {var} new data.")
+
                 except ZeroDivisionError as e:
                     logging.warning(f"{var} TS plot experienced {e}. Try updating map pickles.")
-
-            # fig = plt.figure()
-            # ax = fig.add_subplot(projection='3d')   
-            # ax.scatter(self.df.lon, self.df.lat, self.df.depth_m, c=self.df.cdom)
-            # ax.invert_zaxis()
-            # plt.show()
 
         except Exception as e:
             logging.warning(e)
             pass
-    
+
     def makeSpatialCrossSections(self):
  
         logging.info("Making spatial cross sections.")
@@ -726,7 +839,7 @@ class gliderData:
                 cbar.ax.yaxis.set_tick_params(labelrotation=15)
                 logging.info(f"Finished cross sections for {var}")
 
-            plt.tight_layout()
+            # plt.tight_layout()
             if self.data_dir == f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/":
                 plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_spatial_sections_time_series_{self.date}.pdf")
             else:
@@ -942,6 +1055,49 @@ class gliderData:
             logging.info("Plots generated and sent. Code done.")
         else: logging.info("No new data found. Code done.")
 
+class gotoParser:
+    def __init__(self, goto_dir):
+        self.goto_dir = goto_dir
+        self.wpts = []
+    
+    def parse(self):
+        bool_found_pts = False
+        with open(self.goto_dir) as fn:
+            for line in fn:
+                if "<start:waypoints>" in line:
+                    bool_found_pts = True
+                    continue
+                
+                if bool_found_pts and "<end:waypoints>" not in line:
+                    self.wpts.append(line.strip().split())
+
+        coords = self.convertCoords()
+        return coords
+
+    def convertCoords(self):
+        self.wpt_lats = []
+        self.wpt_lons = []
+
+        for set in self.wpts:
+            for i, pt in enumerate(set):
+                dec_loc = pt.index('.')
+                deg = float(pt[0:dec_loc-2])
+                dec_min = float(pt[dec_loc-2:])/60
+
+                if pt[0]=='-':
+                    dec_degs = deg - dec_min
+                else:
+                    dec_degs = deg + dec_min
+
+                if i == 0:
+                    self.wpt_lons.append(dec_degs)
+                else:
+                    self.wpt_lats.append(dec_degs)
+
+        bar = {'wpt_lon':self.wpt_lons, "wpt_lat":self.wpt_lats}
+        foo = pd.DataFrame(bar)
+
+        return foo
 
 class doEmail:
     def __init__(self, image_dir, csv_dir, glider, date, yos, yos_tot, dive_start, dive_end, dep_start, dep_end, msg=None):
