@@ -118,10 +118,12 @@ class gliderData:
   
         self.problem_dives = [] # empty list to store number values of problematic dives
         
-        self.profiles_to_make = {"profile0":["cdom"],
-                                 "profile1":["absolute_salinity", "temp", "sigma"],
-                                 "profile2":["oxygen"],
-                                 "profile3":["chlorophyl"]} # Dictionary to be looped thru to make depth profiles of scienec vars
+        self.profiles_to_make = {"profile3":["cdom"],
+                                 "profile0":["absolute_salinity"],
+                                 "profile1":["temp"],
+                                 "profile2":["sigma"],
+                                 "profile4":["oxygen"],
+                                 "profile5":["chlorophyl"]} # Dictionary to be looped thru to make depth profiles of scienec vars
       
         self.sci_vars = ["cdom", "chlorophyl", "oxygen", "backscatter"] # List of science variables
         self.sci_colors = {"cdom":cmo.solar, "chlorophyl": cmo.algae, "oxygen":cmo.tempo, "backscatter":colormaps['terrain'], 
@@ -141,7 +143,7 @@ class gliderData:
         # Dictionary of units for plotting purposes
         self.units = {"w":'m/s', "pitch":'deg', "density":"kg $\\bullet m^{-3}$","roll":'deg', "dt":'hrs', 
         "amphr":'Ahr', "vac":'inHg', "cdom":"ppb", "chlorophyl":"µg•$L^{-l}$", "oxygen":"mL•$L^{-1}$", 
-        "backscatter":"$m^{-1}$", "absolute_salinity":"g•$kg^{-1}$", "conservative_temperature":"°C"} # 
+        "backscatter":"$m^{-1}$", "absolute_salinity":"g•$kg^{-1}$", "conservative_temperature":"°C", "temp":"°C", "sigma":"kg $\\bullet m^{-3}$"} # 
         # Dictionary to store acceptable ranges fpr flight parameters
         self.acceptable_ranges = {"dive":{"w":[-0.08, -0.20], "pitch":[-20, -29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]},
                                   "climb":{"w":[0.08, 0.20], "pitch":[20, 29], "roll":[-5, 5], "dt":[0.25, 3], "amphr":[0.05, 1.0], "vac":[6, 10]}}
@@ -241,7 +243,7 @@ class gliderData:
             dbd.close()
             logging.info("Binary files successfully read in.")
         except Exception as e:
-            logging.error(str(e))
+            logging.warning(e, exc_info=True)
             self.sendNoData(e)
 
     def makeDf(self): 
@@ -369,7 +371,7 @@ class gliderData:
 
         logging.info("Profiles added to dataframe.")
         if "new" in self.data_dir:
-            self.n_yos = np.max(self.df.profile_index) - np.min(self.df.profile_index)
+            self.n_yos = np.max(self.df.profile_index)
             self.dive_start = datetime.strftime(np.min(self.df.time), "%Y-%b-%d %H:%M")
             self.dive_end = datetime.strftime(np.max(self.df.time), "%Y-%b-%d %H:%M")
         else:
@@ -518,26 +520,42 @@ class gliderData:
             # plt.show()
 
         except Exception as e:
-            logging.warning(e)
+            logging.warning(e, exc_info=True)
             pass
     
     def makeSciDpPanel(self):
         try:
             logging.info("Making depth profiles.")
-            fig, axs = plt.subplots(nrows=1, ncols=4, figsize=(11, 4), sharey=True)
+            fig, axs = plt.subplots(nrows=1, ncols=6, figsize=(14, 4), sharey=True)
             axs[0].invert_yaxis()
             axs[0].set_ylabel("Depth [m]")
+            # x1 = axs[1].twiny()
+            # axs[1].xaxis.tick_top()
+            # x2 = axs[1].twiny()
+            # x3 = axs[1].twiny()
 
+
+            # x_list = [axs[1], x2, x3]
+            # cs = ['#1f77b4', '#ff7f0e','#2ca02c']
+            
+            # axs[1].tick_params(axis='x', colors='#1f77b4')
+            # x2.tick_params(axis='x', colors='#ff7f0e')
+            # x3.tick_params(axis='x', colors='#2ca02c')
+            # x3.spines['bottom'].set_position(('outward', 50))
+            
             profs = self.profiles_to_make.keys()
-            colors = ['k', 'c0', 'r', 'g']
+            # colors = ['k', 'c0', 'r', 'g']
             ind_dfs = {}
             dfs_of_same_columns = {}
 
             for i, prof in enumerate(self.profiles_to_make.keys()):
                 axs[i].xaxis.tick_top()
                 for j, var in enumerate(self.profiles_to_make[prof]):
+                    logging.info(f"Making {var} plot {prof}.")
+                    axs[i].xaxis.set_label_position('top') 
                     axs[i].scatter(self.df[var], self.df.depth_m, s=5, label=var)
-                    axs[i].legend()
+                    axs[i].set_xlabel(f"{var} [{self.units[var]}]")
+                    # axs[i].legend()
 
             if self.data_dir == f"/opt/slocumRtDataVisTool/data/{self.glider}/processed/":
                 plt.savefig(f"/opt/slocumRtDataVisTool/images/{self.glider}/toSend/{self.glider}_depth_profiles_full_time_series.png")
@@ -548,7 +566,7 @@ class gliderData:
             # plt.show()
 
         except Exception as e:
-            logging.warning(e)
+            logging.warning(e, exc_info=True)
             pass
     
     def makeSciTSPanel(self):
@@ -586,6 +604,7 @@ class gliderData:
 
                     ax0.invert_yaxis()
                     ax2.invert_yaxis()
+                    ax2.xaxis.set_label_position('top') 
 
                     ax1.set_xlabel("Salinity [$g \\bullet kg^{-1}$]", fontsize=14)
                     ax1.set_ylabel("Temperature [°C]", fontsize=14)
@@ -665,7 +684,7 @@ class gliderData:
                     continue
 
         except Exception as e:
-            logging.warning(e)
+            logging.warning(e, exc_info=True)
             pass
 
     def makeSpatialCrossSections(self):
@@ -722,7 +741,7 @@ class gliderData:
             logging.info("Saved cross section panel.")
 
         except Exception as e:
-            logging.warning(e)
+            logging.warning(e, exc_info=True)
             pass
 
     def makeSegmentedDf(self):
@@ -997,6 +1016,7 @@ class doEmail:
 
         self.sender_email = "esdgliders@gmail.com"
         self.no_data_recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"]
+        #self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com", "jacob.partida@noaa.gov", "jen.walsh@noaa.gov", "anthony.cossio@noaa.gov", "christian.reiss@noaa.gov","eric.bjorkstedt@noaa.gov", "jason.c.clark@noaa.gov", "george.watters@noaa.gov", "jefferson.hinke@noaa.gov", "douglas.krause@noaa.gov"]
         self.recipiants = ["caleb.flaim@noaa.gov", "esdgliders@gmail.com"] #nmfs.swfsc.esd-gliders@noaa.gov , "jacob.partida@noaa.gov", 
                         #    "jen.walsh@noaa.gov", "anthony.cossio@noaa.gov", "christian.reiss@noaa.gov",
                         #    "eric.bjorkstedt@noaa.gov"
@@ -1125,7 +1145,7 @@ if __name__ == "__main__":
             level=getattr(logging, parsed_args.loglevel.upper()), 
             datefmt="%Y-%m-%d %H:%M:%S")
 
-        logging.warning(e)
+        logging.warning(e, exc_info=True)
 
 # [x] The code needs to start by mounting the amlr-dev-#### bucket to /mnt/ using esdglider.gcs_mount_bucket()
 # [x] The code them needs to take in a variable (e.g., $DEPLOYMENT) and find the glider name using the String.split('-') function --> first element is the glider name.
